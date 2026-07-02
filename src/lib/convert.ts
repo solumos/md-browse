@@ -16,6 +16,19 @@ const MIN_ARTICLE_CHARS = 200;
 export function buildPage(raw: RawResponse, requestedUrl: string): PageResult {
   const ct = raw.contentType;
 
+  // 0. A direct image URL — show the image in-app instead of a raw-bytes error.
+  if (ct.startsWith("image/")) {
+    const name = fileNameOf(raw.finalUrl);
+    return {
+      requestedUrl,
+      finalUrl: raw.finalUrl,
+      title: name || hostOf(raw.finalUrl),
+      markdown: `![${name}](${raw.finalUrl})`,
+      source: "raw",
+      status: raw.status,
+    };
+  }
+
   // 1. Native markdown (the content-negotiation happy path).
   if (
     ct.includes("markdown") ||
@@ -446,5 +459,16 @@ function hostOf(url: string): string {
     return new URL(url).host || url;
   } catch {
     return url;
+  }
+}
+
+/** The last path segment of a URL (e.g. an image's file name), decoded. */
+function fileNameOf(url: string): string {
+  try {
+    const path = new URL(url).pathname;
+    const seg = path.split("/").filter(Boolean).pop() ?? "";
+    return decodeURIComponent(seg);
+  } catch {
+    return "";
   }
 }

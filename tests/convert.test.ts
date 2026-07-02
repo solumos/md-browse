@@ -90,6 +90,19 @@ describe("buildPage — content negotiation", () => {
       buildPage(raw({ body: "   ", contentType: "text/markdown" }), BASE),
     ).toThrowError(PageError);
   });
+
+  it("renders a direct image URL as an inline image (not an error)", () => {
+    const page = buildPage(
+      raw({
+        body: "",
+        contentType: "image/jpeg",
+        finalUrl: "https://i.redd.it/abc123.jpg",
+      }),
+      "https://i.redd.it/abc123.jpg",
+    );
+    expect(page.source).toBe("raw");
+    expect(page.markdown).toBe("![abc123.jpg](https://i.redd.it/abc123.jpg)");
+  });
 });
 
 describe("htmlToMarkdown — fidelity", () => {

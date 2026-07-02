@@ -75,7 +75,12 @@ export async function fetchRaw(url: string, post?: string): Promise<RawResponse>
     );
   }
 
-  // Reject obviously-binary content before reading the whole body as text.
+  // Images: don't read the (binary) body — the viewer renders them by URL.
+  if (contentType.startsWith("image/")) {
+    return { body: "", contentType, finalUrl, status: res.status };
+  }
+
+  // Reject other binary content before reading the whole body as text.
   if (contentType && !isTextual(contentType)) {
     throw new PageError(
       "unsupported-content",

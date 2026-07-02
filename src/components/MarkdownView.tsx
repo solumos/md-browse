@@ -24,9 +24,10 @@ interface Props {
   onOpenExternal: (url: string) => void;
 }
 
-// File extensions we can't render as markdown — open them in the OS instead.
+// True downloads / files we can't show — open these in the OS instead. Images
+// are deliberately NOT here: image links open in-app (we render the image).
 const DOWNLOADABLE =
-  /\.(pdf|zip|gz|tgz|tar|rar|7z|dmg|exe|msi|pkg|deb|apk|png|jpe?g|gif|webp|bmp|ico|tiff?|mp4|webm|mov|mkv|avi|mp3|wav|flac|ogg|woff2?|ttf|otf|csv|xlsx?|docx?|pptx?|epub)$/i;
+  /\.(pdf|zip|gz|tgz|tar|rar|7z|dmg|exe|msi|pkg|deb|apk|mp4|webm|mov|mkv|avi|mp3|wav|flac|ogg|woff2?|ttf|otf|csv|xlsx?|docx?|pptx?|epub)$/i;
 
 export function MarkdownView({
   markdown,
