@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import { preserveForms, restoreFormBlocks } from "./forms";
 import { PageError, type PageResult, type RawResponse } from "./types";
 import { looksLikeMarkdownUrl, resolveUrl } from "./url";
 
@@ -82,6 +83,15 @@ export function htmlToMarkdown(
 ): { markdown: string; title: string } {
   const doc = new DOMParser().parseFromString(html, "text/html");
   injectBase(doc, finalUrl);
+  // Capture the site's primary nav (header bar) before Readability strips it as
+  // "chrome" — for a browser, links like HN's "new | past | … | login" matter.
+  const navLine = extractNav(doc, finalUrl);
+  // Give text-less icon links (vote arrows, icon buttons) their title/alt as
+  // text now, or Readability discards them as empty and they become unclickable.
+  materializeIconLinks(doc);
+  // Serialize forms into placeholder tokens before Readability/Turndown run,
+  // so search boxes & co. survive conversion (restored as md-form blocks below).
+  const formSpecs = preserveForms(doc, finalUrl);
   flattenLayoutTables(doc);
   const docTitle = doc.title?.trim() ?? "";
 
@@ -110,6 +120,8 @@ export function htmlToMarkdown(
     markdown = td.turndown(root.innerHTML);
   }
 
+  if (navLine) markdown = `${navLine}\n\n---\n\n${markdown}`;
+  markdown = restoreFormBlocks(markdown, formSpecs);
   return { markdown: cleanupMarkdown(markdown), title: articleTitle || docTitle };
 }
 
@@ -129,8 +141,10 @@ function makeTurndown(baseUrl: string): TurndownService {
     replacement: (content, node) => {
       const el = node as unknown as HTMLAnchorElement;
       const href = el.getAttribute("href");
-      const text = content.trim();
-      if (!text) return ""; // icon/vote/empty anchors are just noise
+      // Icon-only links (e.g. HN's vote arrows) have no text — recover a label
+      // from a title/aria-label/nested alt so they stay usable, not invisible.
+      const text = content.trim() || iconLinkLabel(el);
+      if (!text) return ""; // truly empty anchor — nothing to show
       if (!href || href.startsWith("#")) return text; // no target / in-page anchor
       const abs = resolveUrl(href, baseUrl);
       if (!abs) return text;
@@ -155,7 +169,133 @@ function makeTurndown(baseUrl: string): TurndownService {
     },
   });
 
+  // Standalone controls (outside any <form> — those were already serialized to
+  // md-form blocks) can't work without JavaScript, but dropping them leaves
+  // visible holes in the page. Show them as inline `[ label ]` badges instead.
+  td.addRule("orphan-controls", {
+    filter: (node) => node.nodeName === "BUTTON" || node.nodeName === "INPUT",
+    replacement: (_content, node) => {
+      const label = orphanControlLabel(node as unknown as HTMLElement);
+      return label ? "`[ " + label + " ]`" : "";
+    },
+  });
+
+  // Option lists and textareas outside forms are JS-driven noise; without this
+  // rule their text content would leak into the output as run-on prose.
+  td.addRule("drop-orphan-choice-controls", {
+    filter: ["select", "textarea", "option", "optgroup", "datalist"],
+    replacement: () => "",
+  });
+
   return td;
+}
+
+/** Visible caption for a standalone button/input, or "" when it's pure noise. */
+function orphanControlLabel(el: HTMLElement): string {
+  let label = "";
+  if (el.nodeName === "BUTTON") {
+    label =
+      el.textContent || el.getAttribute("value") || el.getAttribute("aria-label") || "";
+  } else {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    if (type === "hidden" || type === "checkbox" || type === "radio") return "";
+    if (["submit", "button", "reset", "image"].includes(type)) {
+      label =
+        el.getAttribute("value") ||
+        el.getAttribute("alt") ||
+        el.getAttribute("aria-label") ||
+        "";
+    } else {
+      label = el.getAttribute("placeholder") || el.getAttribute("aria-label") || "";
+    }
+  }
+  return label.replace(/`/g, "'").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/**
+ * Give every text-less link with a recoverable label (title/aria-label) that
+ * label as literal text. Runs before Readability, which would otherwise drop
+ * such links as empty — losing things like HN's up/down-vote arrows.
+ *
+ * Anchors that wrap real media (an <img> etc.) are left alone: they already
+ * render as a linked image, and overwriting textContent would delete the image.
+ */
+function materializeIconLinks(doc: Document): void {
+  for (const a of Array.from(doc.querySelectorAll("a[href]"))) {
+    if (a.textContent?.trim()) continue;
+    if (a.querySelector("img, svg, picture, video, audio, canvas")) continue;
+    const label = iconLinkLabel(a);
+    if (label) a.textContent = label;
+  }
+}
+
+/** Recover a label for a text-less anchor from its (or a child's) title/aria-label. */
+function iconLinkLabel(el: Element): string {
+  const own = el.getAttribute("title") || el.getAttribute("aria-label");
+  if (own?.trim()) return own.trim();
+  const nested =
+    el.querySelector("[title]")?.getAttribute("title") ||
+    el.querySelector("[aria-label]")?.getAttribute("aria-label");
+  return nested?.trim() ?? "";
+}
+
+/**
+ * Extract the page's primary navigation (site header / nav bar) as a compact
+ * markdown link line, and remove it from the document so it isn't duplicated.
+ * Readability discards these regions as "chrome", but for a *browser* the top
+ * nav (e.g. Hacker News's "new | past | comments | … | login") is worth keeping.
+ * Returns "" when there's no clear nav, or it's a huge mega-menu.
+ */
+function extractNav(doc: Document, baseUrl: string): string {
+  const candidates = Array.from(
+    doc.querySelectorAll(
+      'nav, [role="navigation"], .pagetop, header, [role="banner"]',
+    ),
+  );
+  if (!candidates.length) return "";
+
+  const seen = new Set<string>();
+  const links: string[] = [];
+  const toRemove: Element[] = [];
+
+  for (const c of candidates) {
+    // Never touch content-bearing regions: an article/hero <header> with a
+    // heading, or anything wrapping the main content, is NOT a nav bar.
+    if (c.querySelector("h1, h2, h3, article, main")) continue;
+
+    // A nav bar is mostly links. If most of the region's text isn't inside
+    // links, it's prose we must not delete.
+    const anchors = Array.from(c.querySelectorAll("a[href]"));
+    const linkChars = anchors.reduce(
+      (n, a) => n + (a.textContent ?? "").replace(/\s+/g, "").length,
+      0,
+    );
+    const totalChars = (c.textContent ?? "").replace(/\s+/g, "").length;
+    if (totalChars > 0 && linkChars / totalChars < 0.6) continue;
+
+    let added = 0;
+    for (const a of anchors) {
+      const text = (a.textContent ?? "").replace(/\s+/g, " ").trim();
+      const href = a.getAttribute("href");
+      if (!text || text.length > 30 || !href || href.startsWith("#")) continue;
+      const abs = resolveUrl(href, baseUrl);
+      if (!abs || seen.has(abs)) continue;
+      seen.add(abs);
+      links.push(`[${text}](${abs})`);
+      added++;
+    }
+    if (added > 0) toRemove.push(c);
+  }
+
+  // Too few links isn't a nav; too many is a mega-menu we'd rather not dump.
+  if (links.length < 2 || links.length > 40) return "";
+
+  // Remove only the regions we actually pulled links from, and never one
+  // holding a <form> (e.g. a header search box) — that's for the form pipeline.
+  for (const c of toRemove) {
+    if (!c.querySelector("form")) c.remove();
+  }
+  return links.join(" · ");
 }
 
 /** Insert (or update) a <base href> so URL resolution has a reference point. */
@@ -196,11 +336,16 @@ function flattenLayoutTables(root: Document): void {
   }
 }
 
-/** Remove non-content elements before a full-body fallback conversion. */
+/**
+ * Remove non-content elements before a full-body fallback conversion.
+ * `form` here only catches forms that preserveForms skipped as unrenderable
+ * (hidden-only trackers); standalone buttons/inputs are kept so the Turndown
+ * orphan-control rules can badge them.
+ */
 function stripNoise(root: Element): void {
   root
     .querySelectorAll(
-      "script, style, noscript, template, iframe, svg, canvas, nav, footer, header, aside, form, button, input, select",
+      "script, style, noscript, template, iframe, svg, canvas, nav, footer, header, aside, form",
     )
     .forEach((el) => el.remove());
 }

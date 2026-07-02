@@ -10,22 +10,28 @@ const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const ACCEPT_HEADER =
   "text/markdown, text/html;q=0.9, text/plain;q=0.8, */*;q=0.1";
 
-const USER_AGENT = "MarkdownBrowser/0.1 (Tauri; +markdown-first)";
+const USER_AGENT = "MarkdownBrowser/0.2 (Tauri; +markdown-first)";
 
 /**
  * Fetch a URL natively through the Rust side (no CORS), asking for markdown via
- * the Accept header. Returns the raw body + content type + final URL, or throws
- * a typed PageError.
+ * the Accept header. Pass `post` (an urlencoded body) to submit a form instead
+ * of GETting; the Rust HTTP client carries a persistent cookie jar, so
+ * Set-Cookie responses (logins) establish sessions that survive restarts.
+ * Returns the raw body + content type + final URL, or throws a typed PageError.
  */
-export async function fetchRaw(url: string): Promise<RawResponse> {
+export async function fetchRaw(url: string, post?: string): Promise<RawResponse> {
   let res: Response;
   try {
     res = await fetch(url, {
-      method: "GET",
+      method: post == null ? "GET" : "POST",
       headers: {
         Accept: ACCEPT_HEADER,
         "User-Agent": USER_AGENT,
+        ...(post == null
+          ? {}
+          : { "Content-Type": "application/x-www-form-urlencoded" }),
       },
+      body: post,
       redirect: "follow",
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });

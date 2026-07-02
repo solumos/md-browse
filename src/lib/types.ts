@@ -1,3 +1,14 @@
+/**
+ * One browser navigation: a URL, plus an urlencoded body when it's a POST
+ * (form submission). History entries are NavRequests, so back/forward/reload
+ * replay the original request — like a real browser resubmitting a form.
+ */
+export interface NavRequest {
+  url: string;
+  /** application/x-www-form-urlencoded body; presence means POST. */
+  post?: string;
+}
+
 /** The raw result of fetching a URL, before content negotiation/conversion. */
 export interface RawResponse {
   /** Response body as text. */
