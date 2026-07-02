@@ -58,9 +58,12 @@ export function normalizeUrl(input: string): string {
  */
 function preferServerRenderedHost(url: URL): void {
   const host = url.hostname.toLowerCase();
-  if (/^(www\.|m\.|np\.|new\.)?reddit\.com$/.test(host)) {
-    url.hostname = "old.reddit.com";
-  }
+  if (!/^(www\.|m\.|np\.|new\.)?reddit\.com$/.test(host)) return;
+  url.hostname = "old.reddit.com";
+  // old.reddit has no /gallery/ route (that's a new-reddit URL); the gallery id
+  // is the post id, so map it to the post's comments page.
+  const gallery = url.pathname.match(/^\/gallery\/(\w+)\/?$/);
+  if (gallery) url.pathname = `/comments/${gallery[1]}`;
 }
 
 /** Resolve a possibly-relative href against a base URL. Returns null if unparseable. */

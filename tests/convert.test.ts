@@ -480,3 +480,29 @@ describe("htmlToMarkdown — comment threads (nesting)", () => {
     expect(bqDepth(markdown, "carol")).toBe(3);
   });
 });
+
+describe("htmlToMarkdown — noise cleanup", () => {
+  it("shows javascript:/data: links as plain text (not dead links)", () => {
+    const html =
+      "<html><body><article>" +
+      `<p>${"Real article body text long enough to extract cleanly here. ".repeat(6)}</p>` +
+      '<p>Click <a href="javascript:void(0)">share</a> or <a href="https://ok.com/go">go</a>.</p>' +
+      "</article></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://example.com/");
+    expect(markdown).not.toContain("javascript:");
+    expect(markdown).not.toContain("[share]"); // rendered as plain text
+    expect(markdown).toContain("[go](https://ok.com/go)");
+  });
+
+  it("strips reddit logged-out chrome on reddit hosts", () => {
+    const html =
+      '<html><body><div class="content" role="main">' +
+      '<div class="listingsignupbar"><h2 class="listingsignupbar__title">Welcome to Reddit</h2><p>Become a Redditor</p></div>' +
+      '<div class="sitetable"><div class="thing"><p class="title"><a href="https://ex.com/p">A real post title</a></p>' +
+      `<p>${"Actual post content that should survive the cleanup here. ".repeat(5)}</p></div></div>` +
+      "</div></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://old.reddit.com/r/x/");
+    expect(markdown).not.toContain("Welcome to Reddit");
+    expect(markdown).toContain("A real post title");
+  });
+});

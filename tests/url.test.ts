@@ -12,6 +12,15 @@ describe("normalizeUrl — reddit → old.reddit", () => {
     );
   });
 
+  it("maps new-reddit /gallery/<id> to old.reddit /comments/<id>", () => {
+    expect(normalizeUrl("https://www.reddit.com/gallery/1ulr5bj")).toBe(
+      "https://old.reddit.com/comments/1ulr5bj",
+    );
+    expect(normalizeUrl("reddit.com/gallery/abc123/")).toBe(
+      "https://old.reddit.com/comments/abc123",
+    );
+  });
+
   it("leaves old.reddit and unrelated hosts untouched", () => {
     expect(normalizeUrl("https://old.reddit.com/r/x")).toBe(
       "https://old.reddit.com/r/x",
