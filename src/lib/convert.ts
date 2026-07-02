@@ -2,6 +2,7 @@ import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import { preserveForms, restoreFormBlocks } from "./forms";
+import { preserveEmbeds, restoreEmbedBlocks } from "./embeds";
 import { PageError, type PageResult, type RawResponse } from "./types";
 import { looksLikeMarkdownUrl, resolveUrl } from "./url";
 
@@ -102,6 +103,9 @@ export function htmlToMarkdown(
   // Give text-less icon links (vote arrows, icon buttons) their title/alt as
   // text now, or Readability discards them as empty and they become unclickable.
   materializeIconLinks(doc);
+  // Preserve video embeds (<iframe>/<video>) before the strip/Readability passes
+  // drop them; restored as md-embed blocks and rendered as real players.
+  const embedSpecs = preserveEmbeds(doc, finalUrl);
   // Rebuild HN/reddit reply trees as nested blockquotes before the table/flatten
   // passes would collapse their structure into an undifferentiated wall of text.
   const hasCommentTree = preserveComments(doc);
@@ -145,13 +149,19 @@ export function htmlToMarkdown(
   if (articleHtml) {
     markdown = td.turndown(articleHtml);
   } else {
-    const root = doc.body ?? doc.documentElement;
+    // Prefer the semantic main region when present: it drops site chrome the
+    // whole <body> would include (e.g. reddit's subreddit bar, sidebar, footer).
+    const root =
+      doc.querySelector("main, [role='main']") ??
+      doc.body ??
+      doc.documentElement;
     stripNoise(root);
     markdown = td.turndown(root.innerHTML);
   }
 
   if (navLine) markdown = `${navLine}\n\n---\n\n${markdown}`;
   markdown = restoreFormBlocks(markdown, formSpecs);
+  markdown = restoreEmbedBlocks(markdown, embedSpecs);
   return { markdown: cleanupMarkdown(markdown), title: articleTitle || docTitle };
 }
 
@@ -388,9 +398,13 @@ function childComments(container: Element): Element[] {
 function renderRedditComment(doc: Document, comment: Element): HTMLQuoteElement {
   const bq = doc.createElement("blockquote");
   const author = comment.querySelector(":scope > .entry .author")?.textContent;
-  const score =
-    comment.querySelector(":scope > .entry .tagline .score")?.textContent ?? "";
-  bq.appendChild(commentHeader(doc, author, score));
+  // reddit renders three .score spans (dislikes/unvoted/likes); .unvoted is the
+  // real count. Fall back to the first for older/other markup.
+  const score = (
+    comment.querySelector(":scope > .entry .tagline .score.unvoted") ??
+    comment.querySelector(":scope > .entry .tagline .score")
+  )?.textContent;
+  bq.appendChild(commentHeader(doc, author, score ?? ""));
   const body = comment.querySelector(":scope > .entry .usertext-body .md");
   if (body) bq.appendChild(body.cloneNode(true));
   const kids = comment.querySelector(":scope > .child > .sitetable");
