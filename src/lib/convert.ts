@@ -102,6 +102,9 @@ export function htmlToMarkdown(
   // Give text-less icon links (vote arrows, icon buttons) their title/alt as
   // text now, or Readability discards them as empty and they become unclickable.
   materializeIconLinks(doc);
+  // Rebuild HN/reddit reply trees as nested blockquotes before the table/flatten
+  // passes would collapse their structure into an undifferentiated wall of text.
+  const hasCommentTree = preserveComments(doc);
   // Serialize forms into placeholder tokens before Readability/Turndown run,
   // so search boxes & co. survive conversion (restored as md-form blocks below).
   const formSpecs = preserveForms(doc, finalUrl);
@@ -114,23 +117,27 @@ export function htmlToMarkdown(
 
   let articleHtml: string | null = null;
   let articleTitle = "";
-  try {
-    // Readability mutates the document it's given, so hand it a clone.
-    const clone = doc.cloneNode(true) as Document;
-    const article = new Readability(clone).parse();
-    const textLen = article?.textContent?.trim().length ?? 0;
-    // On aggregator/index pages (old.reddit, forums) Readability sometimes
-    // latches onto a small wrong region (a sidebar/search panel) that still
-    // clears the length threshold, silently dropping the real content. If it
-    // captured only a sliver of a large page, distrust it and use the full body.
-    const capturedEnough =
-      bodyTextLen < 4000 || textLen >= bodyTextLen * 0.25;
-    if (article?.content && textLen >= MIN_ARTICLE_CHARS && capturedEnough) {
-      articleHtml = article.content;
-      articleTitle = article.title?.trim() ?? "";
+  // A rebuilt comment tree IS the content; Readability would flatten its
+  // nesting, so skip extraction and convert the full body in that case.
+  if (!hasCommentTree) {
+    try {
+      // Readability mutates the document it's given, so hand it a clone.
+      const clone = doc.cloneNode(true) as Document;
+      const article = new Readability(clone).parse();
+      const textLen = article?.textContent?.trim().length ?? 0;
+      // On aggregator/index pages (old.reddit, forums) Readability sometimes
+      // latches onto a small wrong region (a sidebar/search panel) that still
+      // clears the length threshold, silently dropping the real content. If it
+      // captured only a sliver of a large page, distrust it and use the full body.
+      const capturedEnough =
+        bodyTextLen < 4000 || textLen >= bodyTextLen * 0.25;
+      if (article?.content && textLen >= MIN_ARTICLE_CHARS && capturedEnough) {
+        articleHtml = article.content;
+        articleTitle = article.title?.trim() ?? "";
+      }
+    } catch {
+      // fall through to full-body conversion
     }
-  } catch {
-    // fall through to full-body conversion
   }
 
   const td = makeTurndown(finalUrl);
@@ -330,6 +337,101 @@ function injectBase(doc: Document, url: string): void {
     head.insertBefore(base, head.firstChild);
   }
   base.setAttribute("href", url);
+}
+
+/**
+ * HN and old.reddit render discussions as indented reply trees. Turndown would
+ * flatten them into a structureless wall of text, so we rebuild the nesting as
+ * nested <blockquote>s (which become "> ", ">> ", … in markdown) before the
+ * table/Readability passes run.
+ */
+function preserveComments(doc: Document): boolean {
+  // Either match transforms the tree in place; return whether we found one, so
+  // the caller can skip Readability (which would flatten the nesting we built).
+  const reddit = preserveRedditComments(doc);
+  const hn = preserveHackerNewsComments(doc);
+  return reddit || hn;
+}
+
+/** Build the "**author** · meta" header line for a comment blockquote. */
+function commentHeader(
+  doc: Document,
+  author: string | null | undefined,
+  meta: string,
+): HTMLParagraphElement {
+  const p = doc.createElement("p");
+  const strong = doc.createElement("strong");
+  strong.textContent = author?.trim() || "[deleted]";
+  p.appendChild(strong);
+  if (meta.trim()) p.appendChild(doc.createTextNode(` · ${meta.trim()}`));
+  return p;
+}
+
+// old.reddit nests replies structurally: .comment > .child > … > .comment.
+function preserveRedditComments(doc: Document): boolean {
+  const listing = doc.querySelector(".commentarea .sitetable.nestedlisting");
+  if (!listing) return false;
+  const container = doc.createElement("div");
+  for (const c of childComments(listing)) {
+    container.appendChild(renderRedditComment(doc, c));
+  }
+  listing.replaceWith(container);
+  return true;
+}
+
+function childComments(container: Element): Element[] {
+  return Array.from(container.children).filter((c) =>
+    c.classList.contains("comment"),
+  );
+}
+
+function renderRedditComment(doc: Document, comment: Element): HTMLQuoteElement {
+  const bq = doc.createElement("blockquote");
+  const author = comment.querySelector(":scope > .entry .author")?.textContent;
+  const score =
+    comment.querySelector(":scope > .entry .tagline .score")?.textContent ?? "";
+  bq.appendChild(commentHeader(doc, author, score));
+  const body = comment.querySelector(":scope > .entry .usertext-body .md");
+  if (body) bq.appendChild(body.cloneNode(true));
+  const kids = comment.querySelector(":scope > .child > .sitetable");
+  if (kids) {
+    for (const child of childComments(kids)) {
+      bq.appendChild(renderRedditComment(doc, child));
+    }
+  }
+  return bq;
+}
+
+// HN lays comments out as a flat row list; depth is on <td class="ind" indent="N">.
+function preserveHackerNewsComments(doc: Document): boolean {
+  const rows = Array.from(doc.querySelectorAll("tr.athing.comtr"));
+  if (!rows.length) return false;
+  const tree = rows[0].closest("table");
+  const container = doc.createElement("div");
+  const stack: Element[] = []; // stack[d] = the blockquote currently open at depth d
+
+  for (const row of rows) {
+    const ind = row.querySelector("td.ind");
+    const depth =
+      Number(ind?.getAttribute("indent")) ||
+      Math.round(Number(ind?.querySelector("img")?.getAttribute("width")) / 40) ||
+      0;
+
+    const bq = doc.createElement("blockquote");
+    const author = row.querySelector(".hnuser")?.textContent;
+    const age = row.querySelector(".age")?.textContent ?? "";
+    bq.appendChild(commentHeader(doc, author, age));
+    const text = row.querySelector(".commtext");
+    if (text) bq.appendChild(text.cloneNode(true));
+
+    const parent = depth > 0 ? stack[depth - 1] : undefined;
+    (parent ?? container).appendChild(bq);
+    stack[depth] = bq;
+    stack.length = depth + 1;
+  }
+
+  (tree ?? rows[0]).replaceWith(container);
+  return true;
 }
 
 // Block/media content that can't live inside a GFM (single-line) table cell.

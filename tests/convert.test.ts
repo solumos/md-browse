@@ -424,3 +424,59 @@ describe("htmlToMarkdown — full-body fallback", () => {
     expect(markdown).toContain("https://example.com/x");
   });
 });
+
+/** Blockquote depth of the line containing `needle` (Turndown uses "> > "). */
+function bqDepth(markdown: string, needle: string): number {
+  const line = markdown.split("\n").find((l) => l.includes(needle)) ?? "";
+  return (line.match(/^((?:>\s*)+)/)?.[1].match(/>/g) ?? []).length;
+}
+
+describe("htmlToMarkdown — comment threads (nesting)", () => {
+  it("nests Hacker News replies by their indent depth", () => {
+    const row = (id: number, indent: number, user: string, text: string) =>
+      `<tr class="athing comtr" id="${id}"><td><table><tbody><tr>` +
+      `<td class="ind" indent="${indent}"><img src="s.gif" width="${indent * 40}"></td>` +
+      `<td class="default"><div class="comhead"><a class="hnuser">${user}</a> <span class="age">1 hour ago</span></div>` +
+      `<div class="comment"><div class="commtext">${text}</div></div></td></tr></tbody></table></td></tr>`;
+    const html =
+      '<html><body><table class="comment-tree"><tbody>' +
+      row(1, 0, "alice", "top-level point") +
+      row(2, 1, "bob", "a direct reply") +
+      row(3, 2, "carol", "reply to the reply") +
+      "</tbody></table></body></html>";
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://news.ycombinator.com/item?id=1",
+    );
+    expect(markdown).toContain("**alice**");
+    expect(markdown).toContain("a direct reply");
+    // Depth strictly increases with reply nesting.
+    expect(bqDepth(markdown, "alice")).toBe(1);
+    expect(bqDepth(markdown, "bob")).toBe(2);
+    expect(bqDepth(markdown, "carol")).toBe(3);
+  });
+
+  it("nests old.reddit replies by DOM structure", () => {
+    const comment = (author: string, text: string, child = ""): string =>
+      '<div class="thing comment"><div class="entry">' +
+      `<p class="tagline"><a class="author">${author}</a> <span class="score unvoted">5 points</span></p>` +
+      `<div class="usertext-body"><div class="md"><p>${text}</p></div></div></div>` +
+      (child
+        ? `<div class="child"><div class="sitetable listing">${child}</div></div>`
+        : "") +
+      "</div>";
+    const html =
+      '<html><body><div class="commentarea"><div class="sitetable nestedlisting">' +
+      comment("alice", "top", comment("bob", "reply", comment("carol", "deep"))) +
+      "</div></div></body></html>";
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://old.reddit.com/r/x/comments/y/",
+    );
+    expect(markdown).toContain("**alice**");
+    expect(markdown).toContain("deep");
+    expect(bqDepth(markdown, "alice")).toBe(1);
+    expect(bqDepth(markdown, "bob")).toBe(2);
+    expect(bqDepth(markdown, "carol")).toBe(3);
+  });
+});
