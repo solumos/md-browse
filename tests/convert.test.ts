@@ -147,6 +147,21 @@ describe("htmlToMarkdown — layout tables (e.g. Hacker News)", () => {
     expect(markdown).toContain("| Name | Age |");
   });
 
+  it("flattens an infobox (th + images) into blocks + key/value, not a 1-col table", () => {
+    const html =
+      '<html><body><table class="infobox">' +
+      '<tr><th colspan="2">Manhattan</th></tr>' +
+      '<tr><td colspan="2"><img src="/pic.jpg" alt="View"></td></tr>' +
+      "<tr><th>Country</th><td>United States</td></tr>" +
+      "<tr><th>Founded</th><td>1624</td></tr>" +
+      "</table></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://example.com/");
+    expect(markdown).not.toContain("| --- |"); // not a garbled GFM table
+    expect(markdown).toContain("![View](https://example.com/pic.jpg)"); // image kept
+    expect(markdown).toContain("**Country**: United States"); // key/value row
+    expect(markdown).toContain("**Founded**: 1624");
+  });
+
   it("keeps the submit button on a 32-control form (field-cap boundary)", () => {
     const inputs = Array.from(
       { length: 32 },

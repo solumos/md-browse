@@ -47,6 +47,7 @@ export type FetchErrorKind =
   | "network"
   | "timeout"
   | "http-status"
+  | "rate-limited"
   | "unsupported-content"
   | "too-large"
   | "empty"

@@ -92,8 +92,12 @@ export function htmlToMarkdown(
   // Serialize forms into placeholder tokens before Readability/Turndown run,
   // so search boxes & co. survive conversion (restored as md-form blocks below).
   const formSpecs = preserveForms(doc, finalUrl);
-  flattenLayoutTables(doc);
+  normalizeTables(doc);
   const docTitle = doc.title?.trim() ?? "";
+
+  const bodyTextLen = (doc.body?.textContent ?? "")
+    .replace(/\s+/g, " ")
+    .trim().length;
 
   let articleHtml: string | null = null;
   let articleTitle = "";
@@ -102,7 +106,13 @@ export function htmlToMarkdown(
     const clone = doc.cloneNode(true) as Document;
     const article = new Readability(clone).parse();
     const textLen = article?.textContent?.trim().length ?? 0;
-    if (article?.content && textLen >= MIN_ARTICLE_CHARS) {
+    // On aggregator/index pages (old.reddit, forums) Readability sometimes
+    // latches onto a small wrong region (a sidebar/search panel) that still
+    // clears the length threshold, silently dropping the real content. If it
+    // captured only a sliver of a large page, distrust it and use the full body.
+    const capturedEnough =
+      bodyTextLen < 4000 || textLen >= bodyTextLen * 0.25;
+    if (article?.content && textLen >= MIN_ARTICLE_CHARS && capturedEnough) {
       articleHtml = article.content;
       articleTitle = article.title?.trim() ?? "";
     }
@@ -309,31 +319,77 @@ function injectBase(doc: Document, url: string): void {
   base.setAttribute("href", url);
 }
 
+// Block/media content that can't live inside a GFM (single-line) table cell.
+const CELL_BLOCK_SELECTOR =
+  "img, picture, video, audio, svg, figure, ul, ol, dl, blockquote, pre, h1, h2, h3, h4, h5, h6, hr";
+
 /**
- * Many sites (Hacker News, old-school layouts) use <table> purely for layout.
- * Turndown's GFM plugin only converts tables with header cells and *keeps the
- * rest as raw HTML* — which our renderer (rehype-raw off) can't display. So we
- * unwrap every header-less table into plain block <div>s, preserving its links
- * and text in reading order. Real data tables (with <th>) are left for GFM.
+ * GFM markdown tables are flat grids of single-line cells. Lots of real HTML
+ * tables aren't that: layout tables (Hacker News), and especially Wikipedia-style
+ * *infoboxes* — vertical key/value panels full of images that happen to use <th>.
+ * Turndown would turn those into a garbled one-column "table", and header-less
+ * layout tables it keeps as raw HTML our renderer can't show.
+ *
+ * So we keep only genuine grid tables (header cells, ≥2 columns, simple inline
+ * cells) for GFM, and unwrap everything else into readable blocks — rendering
+ * 2-cell key/value rows as "**label:** value" so infoboxes read as a definition
+ * list rather than a broken table.
  */
-function flattenLayoutTables(root: Document): void {
+function normalizeTables(root: Document): void {
   const doc = root;
-  // Process innermost-first so nested layout tables unwrap cleanly.
+  // Innermost-first so nested tables unwrap before their parents are judged.
   const tables = Array.from(doc.querySelectorAll("table")).reverse();
   for (const table of tables) {
-    if (table.querySelector("th")) continue; // genuine data table — keep for GFM
+    if (isSimpleDataTable(table)) continue; // leave for the GFM plugin
+
     const container = doc.createElement("div");
     for (const row of Array.from(table.querySelectorAll("tr"))) {
-      const rowDiv = doc.createElement("div");
-      for (const cell of Array.from(row.children)) {
-        const cellDiv = doc.createElement("div");
-        while (cell.firstChild) cellDiv.appendChild(cell.firstChild);
-        rowDiv.appendChild(cellDiv);
+      const cells = Array.from(row.children).filter(
+        (c) => c.tagName === "TD" || c.tagName === "TH",
+      );
+      if (!cells.length) continue;
+
+      if (
+        cells.length === 2 &&
+        cells[0].textContent?.trim() &&
+        cells[1].textContent?.trim() &&
+        !cells[0].querySelector(CELL_BLOCK_SELECTOR) &&
+        !cells[1].querySelector(CELL_BLOCK_SELECTOR)
+      ) {
+        // Key/value row → "**label:** value".
+        const p = doc.createElement("p");
+        const strong = doc.createElement("strong");
+        while (cells[0].firstChild) strong.appendChild(cells[0].firstChild);
+        p.appendChild(strong);
+        p.appendChild(doc.createTextNode(": "));
+        while (cells[1].firstChild) p.appendChild(cells[1].firstChild);
+        container.appendChild(p);
+      } else {
+        for (const cell of cells) {
+          const div = doc.createElement("div");
+          while (cell.firstChild) div.appendChild(cell.firstChild);
+          if (div.childNodes.length) container.appendChild(div);
+        }
       }
-      if (rowDiv.childNodes.length) container.appendChild(rowDiv);
     }
     table.replaceWith(container);
   }
+}
+
+/** A table GFM can render well: has header cells, ≥2 columns, no block/media cells. */
+function isSimpleDataTable(table: Element): boolean {
+  if (!table.querySelector("th")) return false;
+  if (table.querySelector(CELL_BLOCK_SELECTOR)) return false;
+  const maxCols = Math.max(
+    0,
+    ...Array.from(table.querySelectorAll("tr")).map(
+      (r) =>
+        Array.from(r.children).filter(
+          (c) => c.tagName === "TD" || c.tagName === "TH",
+        ).length,
+    ),
+  );
+  return maxCols >= 2;
 }
 
 /**
