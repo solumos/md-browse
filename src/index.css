@@ -48,3 +48,17 @@ body {
   margin-bottom: 0.75em;
   padding-left: 0.9em;
 }
+
+/*
+ * Listing thumbnails (reddit / YouTube results): small inline squares sitting
+ * on the title line, not full-width prose figures.
+ */
+.prose img.inline-thumb {
+  display: inline-block;
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 0.375rem;
+  margin: 0 0.4rem 0 0;
+  vertical-align: middle;
+}

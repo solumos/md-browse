@@ -5,6 +5,7 @@ import { preserveForms, restoreFormBlocks } from "./forms";
 import { preserveEmbeds, restoreEmbedBlocks } from "./embeds";
 import { PageError, type PageResult, type RawResponse } from "./types";
 import { looksLikeMarkdownUrl, resolveUrl } from "./url";
+import { youtubePage } from "./youtube";
 
 /** Below this many characters of extracted text, fall back to converting the whole body. */
 const MIN_ARTICLE_CHARS = 200;
@@ -52,6 +53,19 @@ export function buildPage(raw: RawResponse, requestedUrl: string): PageResult {
 
   // 2. HTML → convert to markdown.
   if (ct.includes("html") || (ct === "" && looksLikeHtml(raw.body))) {
+    // YouTube's HTML shell converts to nothing useful, but its data rides
+    // along as JSON — home/search get purpose-built markdown from it.
+    const yt = youtubePage(raw.body, raw.finalUrl);
+    if (yt) {
+      return {
+        requestedUrl,
+        finalUrl: raw.finalUrl,
+        title: yt.title,
+        markdown: yt.markdown,
+        source: "converted",
+        status: raw.status,
+      };
+    }
     const { markdown, title } = htmlToMarkdown(raw.body, raw.finalUrl);
     if (!markdown.trim()) {
       throw new PageError(
@@ -275,10 +289,22 @@ function materializeIconLinks(doc: Document): void {
   }
 }
 
-/** Reddit noise removed on reddit pages (logged-out CTAs, action bars, dupe scores). */
-const REDDIT_CHROME =
-  ".listingsignupbar, .commentsignupbar, .menuarea, .flat-list.buttons," +
-  " .score.dislikes, .score.likes, .commentarea > .panestack-title, .infobar";
+/** Reddit noise removed on reddit pages (logged-out CTAs, chrome, dupe scores). */
+const REDDIT_CHROME = [
+  ".listingsignupbar", // "Welcome to Reddit" CTA
+  ".commentsignupbar", // "Want to add to the discussion?" CTA
+  ".menuarea", // comment sort controls
+  ".score.dislikes", // dupe vote-state scores (keep .unvoted)
+  ".score.likes",
+  ".commentarea > .panestack-title",
+  ".infobar",
+  ".rank", // listing rank numbers ("1", "2", …)
+  // .thumbnail / .expando are NOT stripped here: compactRedditPosts mines them
+  // for the post's thumbnail, media and selftext, then drops the leftovers.
+  ".expando-button",
+  ".linkflairlabel", // post flair badge (glues onto the title)
+  ".flairrichtext",
+].join(", ");
 
 /** Strip reddit's UI chrome so pages are just the post + comments. */
 function cleanRedditChrome(doc: Document, finalUrl: string): void {
@@ -290,6 +316,156 @@ function cleanRedditChrome(doc: Document, finalUrl: string): void {
   }
   if (!/(^|\.)reddit\.com$/.test(host)) return;
   doc.querySelectorAll(REDDIT_CHROME).forEach((el) => el.remove());
+  // In a post's action bar, keep only the comments link (share/save/report/… are
+  // dead javascript: actions here and just add clutter).
+  doc.querySelectorAll(".flat-list.buttons li").forEach((li) => {
+    if (!li.querySelector("a.comments")) li.remove();
+  });
+  compactRedditPosts(doc);
+  // Thumbnails/expandos not folded into a compacted item are JS-only stubs
+  // ("loading…") or duration overlays — drop what's left.
+  doc.querySelectorAll(".thumbnail, .expando").forEach((el) => el.remove());
+}
+
+/**
+ * Collapse each reddit link/post from a stack of separate blocks (score, title,
+ * tagline, comments on their own lines) into a tight two-line item:
+ *   [thumb] **[title](url)** (domain)
+ *   score · r/sub · time · by user · [N comments](url)
+ * On the post's own comments page, the expando's server-rendered media (gallery
+ * slides / image preview) follows the item at full size instead of the thumb.
+ */
+function compactRedditPosts(doc: Document): void {
+  for (const post of Array.from(doc.querySelectorAll(".thing.link"))) {
+    const titleEl = post.querySelector<HTMLAnchorElement>(".title a.title");
+    if (!titleEl) continue;
+
+    const item = doc.createElement("div");
+    const media = expandoMedia(doc, post);
+
+    const line1 = doc.createElement("p");
+    // Media posts get their thumbnail on the title line — except when the full
+    // media renders right below, where a thumb would just be a duplicate.
+    const thumb = media ? null : thumbnailLink(doc, post, titleEl);
+    if (thumb) {
+      line1.appendChild(thumb);
+      line1.appendChild(doc.createTextNode(" "));
+    }
+    const strong = doc.createElement("strong");
+    const title = doc.createElement("a");
+    title.setAttribute("href", titleEl.getAttribute("href") ?? "");
+    title.textContent = (titleEl.textContent ?? "").trim();
+    strong.appendChild(title);
+    line1.appendChild(strong);
+    const domain = post
+      .querySelector(".title .domain")
+      ?.textContent?.replace(/[()]/g, "")
+      .trim();
+    if (domain) line1.appendChild(doc.createTextNode(` (${domain})`));
+    item.appendChild(line1);
+
+    const line2 = doc.createElement("p");
+    const sep = () => line2.appendChild(doc.createTextNode(" · "));
+    const text = (s: string) => line2.appendChild(doc.createTextNode(s));
+    const move = (el: Element | null) => {
+      if (el) line2.appendChild(el.cloneNode(true));
+    };
+    let first = true;
+    const part = (fn: () => void) => {
+      if (!first) sep();
+      first = false;
+      fn();
+    };
+    const score = post.querySelector(".score.unvoted")?.textContent?.trim();
+    if (score) part(() => text(score));
+    const sub = post.querySelector(".tagline .subreddit");
+    if (sub) part(() => move(sub));
+    const time = post.querySelector(".tagline time")?.textContent?.trim();
+    if (time) part(() => text(time));
+    const author = post.querySelector(".tagline .author");
+    if (author) part(() => { text("by "); move(author); });
+    const comments = post.querySelector("a.comments");
+    if (comments) part(() => move(comments));
+    if (line2.childNodes.length) item.appendChild(line2);
+
+    if (media) item.appendChild(media);
+
+    // Keep a self-post's body text (present on the post's own page).
+    const selftext = post.querySelector(".entry .usertext-body .md");
+    if (selftext) item.appendChild(selftext.cloneNode(true));
+
+    post.replaceWith(item);
+  }
+}
+
+/**
+ * The server-rendered media inside a post's expando (present on the post's own
+ * comments page): every gallery slide's full-size preview, or the single-image
+ * preview linked to the original upload. Null when the expando holds no usable
+ * media (JS-only stubs, v.redd.it videos without a rendered preview).
+ */
+function expandoMedia(doc: Document, post: Element): Element | null {
+  const preview = post.querySelector(".expando .media-preview");
+  if (!preview) return null;
+
+  const out = doc.createElement("div");
+  const seen = new Set<string>();
+  const addImage = (src: string, href: string) => {
+    if (seen.has(src)) return;
+    seen.add(src);
+    const p = doc.createElement("p");
+    const a = doc.createElement("a");
+    a.setAttribute("href", href);
+    const img = doc.createElement("img");
+    img.setAttribute("src", src);
+    a.appendChild(img);
+    p.appendChild(a);
+    out.appendChild(p);
+  };
+
+  // Gallery post: one full-size preview link per slide.
+  for (const a of Array.from(
+    preview.querySelectorAll(".gallery-preview .media-preview-content a[href]"),
+  )) {
+    const href = a.getAttribute("href");
+    if (href) addImage(href, href);
+  }
+  // Single-image post: the page-sized preview, linked to the full original.
+  if (!out.childNodes.length) {
+    const src = preview
+      .querySelector(".media-preview-content img.preview")
+      ?.getAttribute("src");
+    if (src) {
+      const full = preview
+        .querySelector(".media-preview-content a[href]")
+        ?.getAttribute("href");
+      addImage(src, full || src);
+    }
+  }
+  return out.childNodes.length ? out : null;
+}
+
+/**
+ * A post's listing thumbnail as a small linked image. Text/self posts carry an
+ * imageless placeholder .thumbnail — those get nothing.
+ */
+function thumbnailLink(
+  doc: Document,
+  post: Element,
+  titleEl: HTMLAnchorElement,
+): Element | null {
+  const anchor = post.querySelector(".thumbnail");
+  const src = anchor?.querySelector("img")?.getAttribute("src");
+  if (!src) return null;
+  const a = doc.createElement("a");
+  a.setAttribute(
+    "href",
+    anchor?.getAttribute("href") || titleEl.getAttribute("href") || "",
+  );
+  const img = doc.createElement("img");
+  img.setAttribute("src", src);
+  a.appendChild(img);
+  return a;
 }
 
 /** Recover a label for a text-less anchor from its (or a child's) title/aria-label. */
@@ -386,18 +562,47 @@ function preserveComments(doc: Document): boolean {
   return reddit || hn;
 }
 
-/** Build the "**author** · meta" header line for a comment blockquote. */
+/**
+ * Build the "[▲] [▼] **author** · meta" header line for a comment blockquote.
+ * `lead` holds optional vote-arrow anchors placed before the author.
+ */
 function commentHeader(
   doc: Document,
   author: string | null | undefined,
   meta: string,
+  lead: Node[] = [],
 ): HTMLParagraphElement {
   const p = doc.createElement("p");
+  for (const node of lead) {
+    p.appendChild(node);
+    p.appendChild(doc.createTextNode(" "));
+  }
   const strong = doc.createElement("strong");
   strong.textContent = author?.trim() || "[deleted]";
   p.appendChild(strong);
   if (meta.trim()) p.appendChild(doc.createTextNode(` · ${meta.trim()}`));
   return p;
+}
+
+/**
+ * HN's comment vote arrows are plain GET links (vote?id=…&how=up&goto=…) that,
+ * once you're logged in, register the vote and redirect back — so they work in
+ * our navigate model. Return ▲/▼ anchors for whichever arrows the row has.
+ */
+function hnVoteArrows(doc: Document, row: Element): Node[] {
+  const out: Node[] = [];
+  for (const [dir, glyph] of [
+    ["up", "▲"],
+    ["down", "▼"],
+  ] as const) {
+    const href = row.querySelector(`a[id^="${dir}_"]`)?.getAttribute("href");
+    if (!href) continue;
+    const a = doc.createElement("a");
+    a.setAttribute("href", href);
+    a.textContent = glyph;
+    out.push(a);
+  }
+  return out;
 }
 
 // old.reddit nests replies structurally: .comment > .child > … > .comment.
@@ -457,7 +662,7 @@ function preserveHackerNewsComments(doc: Document): boolean {
     const bq = doc.createElement("blockquote");
     const author = row.querySelector(".hnuser")?.textContent;
     const age = row.querySelector(".age")?.textContent ?? "";
-    bq.appendChild(commentHeader(doc, author, age));
+    bq.appendChild(commentHeader(doc, author, age, hnVoteArrows(doc, row)));
     const text = row.querySelector(".commtext");
     if (text) bq.appendChild(text.cloneNode(true));
 
