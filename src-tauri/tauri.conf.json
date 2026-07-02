@@ -24,7 +24,9 @@
         "default-src": "'self'",
         "connect-src": "ipc: http://ipc.localhost",
         "img-src": "'self' data: http: https:",
-        "style-src": "'self' 'unsafe-inline'"
+        "style-src": "'self' 'unsafe-inline'",
+        "media-src": "'self' https: blob:",
+        "frame-src": "https://www.youtube-nocookie.com https://player.vimeo.com"
       }
     }
   },

@@ -4,7 +4,13 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { Element as HastElement, ElementContent } from "hast";
 import { FORM_FENCE_LANG, parseFormSpec, type FormSpec } from "../lib/forms";
+import {
+  EMBED_FENCE_LANG,
+  parseEmbedSpec,
+  type EmbedSpec,
+} from "../lib/embeds";
 import { MarkdownForm } from "./MarkdownForm";
+import { MarkdownEmbed } from "./MarkdownEmbed";
 import "highlight.js/styles/github-dark.css";
 
 interface Props {
@@ -68,12 +74,14 @@ export function MarkdownView({
     // them as working forms (GET submits navigate in-app). Anything else stays
     // a normal <pre>.
     pre({ node, children, ...rest }) {
-      const spec = interactiveForms ? mdFormSpec(node) : null;
-      if (spec) {
+      const form = interactiveForms ? mdFormSpec(node) : null;
+      if (form) {
         return (
-          <MarkdownForm spec={spec} pageUrl={baseUrl} onNavigate={onNavigate} />
+          <MarkdownForm spec={form} pageUrl={baseUrl} onNavigate={onNavigate} />
         );
       }
+      const embed = mdEmbedSpec(node);
+      if (embed) return <MarkdownEmbed spec={embed} />;
       return <pre {...rest}>{children}</pre>;
     },
   };
@@ -84,9 +92,12 @@ export function MarkdownView({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[
-            // plainText keeps md-form blocks un-highlighted so their JSON stays
-            // a single text node for mdFormSpec to parse.
-            [rehypeHighlight, { detect: true, plainText: [FORM_FENCE_LANG] }],
+            // plainText keeps md-form / md-embed blocks un-highlighted so their
+            // JSON stays a single text node for the spec parsers.
+            [
+              rehypeHighlight,
+              { detect: true, plainText: [FORM_FENCE_LANG, EMBED_FENCE_LANG] },
+            ],
           ]}
           components={components}
         >
@@ -97,8 +108,8 @@ export function MarkdownView({
   );
 }
 
-/** Extract and parse an md-form spec from a <pre> hast node, if that's what it is. */
-function mdFormSpec(node: HastElement | undefined): FormSpec | null {
+/** The raw text of a <pre> hast node iff it's a fenced block of language `lang`. */
+function fencedText(node: HastElement | undefined, lang: string): string | null {
   if (!node) return null;
   const code = node.children.find(
     (c): c is HastElement => c.type === "element" && c.tagName === "code",
@@ -106,8 +117,18 @@ function mdFormSpec(node: HastElement | undefined): FormSpec | null {
   if (!code) return null;
   const cls = code.properties?.className;
   const classes = Array.isArray(cls) ? cls : typeof cls === "string" ? [cls] : [];
-  if (!classes.includes(`language-${FORM_FENCE_LANG}`)) return null;
-  return parseFormSpec(hastText(code));
+  if (!classes.includes(`language-${lang}`)) return null;
+  return hastText(code);
+}
+
+function mdFormSpec(node: HastElement | undefined): FormSpec | null {
+  const text = fencedText(node, FORM_FENCE_LANG);
+  return text == null ? null : parseFormSpec(text);
+}
+
+function mdEmbedSpec(node: HastElement | undefined): EmbedSpec | null {
+  const text = fencedText(node, EMBED_FENCE_LANG);
+  return text == null ? null : parseEmbedSpec(text);
 }
 
 function hastText(node: ElementContent): string {
