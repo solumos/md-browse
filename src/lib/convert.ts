@@ -97,6 +97,9 @@ export function htmlToMarkdown(
 ): { markdown: string; title: string } {
   const doc = new DOMParser().parseFromString(html, "text/html");
   injectBase(doc, finalUrl);
+  // Strip reddit's logged-out chrome (signup bars, action buttons, sort menu,
+  // duplicate vote-state scores) before anything else runs.
+  cleanRedditChrome(doc, finalUrl);
   // Capture the site's primary nav (header bar) before Readability strips it as
   // "chrome" — for a browser, links like HN's "new | past | … | login" matter.
   const navLine = extractNav(doc, finalUrl);
@@ -188,6 +191,9 @@ function makeTurndown(baseUrl: string): TurndownService {
       if (!href || href.startsWith("#")) return text; // no target / in-page anchor
       const abs = resolveUrl(href, baseUrl);
       if (!abs) return text;
+      // Only linkify real navigable/actionable schemes. javascript:/data: links
+      // (e.g. reddit's vote/hide/save actions) are dead here — show plain text.
+      if (!/^(https?|mailto|tel):/i.test(abs)) return text;
       const titleAttr = el.getAttribute("title");
       const titlePart = titleAttr ? ` "${escapeQuotes(titleAttr)}"` : "";
       return `[${text}](${abs}${titlePart})`;
@@ -267,6 +273,23 @@ function materializeIconLinks(doc: Document): void {
     const label = iconLinkLabel(a);
     if (label) a.textContent = label;
   }
+}
+
+/** Reddit noise removed on reddit pages (logged-out CTAs, action bars, dupe scores). */
+const REDDIT_CHROME =
+  ".listingsignupbar, .commentsignupbar, .menuarea, .flat-list.buttons," +
+  " .score.dislikes, .score.likes, .commentarea > .panestack-title, .infobar";
+
+/** Strip reddit's UI chrome so pages are just the post + comments. */
+function cleanRedditChrome(doc: Document, finalUrl: string): void {
+  let host: string;
+  try {
+    host = new URL(finalUrl).hostname;
+  } catch {
+    return;
+  }
+  if (!/(^|\.)reddit\.com$/.test(host)) return;
+  doc.querySelectorAll(REDDIT_CHROME).forEach((el) => el.remove());
 }
 
 /** Recover a label for a text-less anchor from its (or a child's) title/aria-label. */
