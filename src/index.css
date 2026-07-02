@@ -26,3 +26,25 @@ body {
 .chrome-no-select {
   user-select: none;
 }
+
+/*
+ * We render comment threads (HN/reddit) as nested blockquotes. Tailwind
+ * Typography styles blockquotes as italic and injects decorative curly quote
+ * marks, which turns whole comment trees italic and litters them with stray
+ * quotes. Render them as clean indented blocks instead.
+ */
+.prose blockquote {
+  font-style: normal;
+  font-weight: 400;
+  quotes: none;
+}
+.prose blockquote p:first-of-type::before,
+.prose blockquote p:last-of-type::after {
+  content: "";
+}
+/* Tighten the heavy default spacing so deep threads stay readable. */
+.prose blockquote {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+  padding-left: 0.9em;
+}
