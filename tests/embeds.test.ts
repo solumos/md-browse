@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEmbedSpec } from "../src/lib/embeds";
+import { parseEmbedSpec, videoEmbedFor } from "../src/lib/embeds";
 import { htmlToMarkdown } from "../src/lib/convert";
 
 const body = "Body text long enough for readability extraction to keep it. ".repeat(
@@ -52,6 +52,21 @@ describe("video embeds", () => {
     expect(htmlToMarkdown(html, "https://example.com/").markdown).not.toContain(
       "md-embed",
     );
+  });
+
+  it("resolves a direct YouTube/Vimeo video URL to an embed", () => {
+    const embed = "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ";
+    expect(videoEmbedFor("https://www.youtube.com/watch?v=dQw4w9WgXcQ")?.src).toBe(
+      embed,
+    );
+    expect(videoEmbedFor("https://youtu.be/dQw4w9WgXcQ")?.src).toBe(embed);
+    expect(videoEmbedFor("https://www.youtube.com/shorts/dQw4w9WgXcQ")?.src).toBe(
+      embed,
+    );
+    expect(videoEmbedFor("https://vimeo.com/123456789")?.kind).toBe("vimeo");
+    // Not a video (homepage / unrelated) → no embed, fetch normally.
+    expect(videoEmbedFor("https://www.youtube.com/")).toBeNull();
+    expect(videoEmbedFor("https://example.com/watch?v=x")).toBeNull();
   });
 
   it("parseEmbedSpec rejects junk, non-https, and unknown kinds", () => {

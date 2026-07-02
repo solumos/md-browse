@@ -75,6 +75,32 @@ export function parseEmbedSpec(text: string): EmbedSpec | null {
   };
 }
 
+/** The fenced md-embed block for a spec (what the renderer turns into a player). */
+export function embedBlock(spec: EmbedSpec): string {
+  return `\`\`\`${EMBED_FENCE_LANG}\n${JSON.stringify(spec)}\n\`\`\``;
+}
+
+/**
+ * If a page URL is itself a YouTube/Vimeo video (e.g. youtube.com/watch?v=…,
+ * youtu.be/…), return its embed spec — so navigating there shows the player
+ * instead of the JavaScript site shell this browser can't render.
+ */
+export function videoEmbedFor(pageUrl: string): EmbedSpec | null {
+  const yt = youtubeId(pageUrl);
+  if (yt) {
+    return {
+      v: 1,
+      kind: "youtube",
+      src: `https://www.youtube-nocookie.com/embed/${yt}`,
+    };
+  }
+  const vimeo = vimeoId(pageUrl);
+  if (vimeo) {
+    return { v: 1, kind: "vimeo", src: `https://player.vimeo.com/video/${vimeo}` };
+  }
+  return null;
+}
+
 function extractEmbed(el: Element, baseUrl: string): EmbedSpec | null {
   const title = el.getAttribute("title")?.trim() || undefined;
 
