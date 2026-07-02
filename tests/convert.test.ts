@@ -456,6 +456,25 @@ describe("htmlToMarkdown — comment threads (nesting)", () => {
     expect(bqDepth(markdown, "carol")).toBe(3);
   });
 
+  it("adds HN upvote links to comment headers", () => {
+    const html =
+      '<html><body><table class="comment-tree"><tbody>' +
+      '<tr class="athing comtr" id="1"><td><table><tbody><tr>' +
+      '<td class="ind" indent="0"><img width="0"></td>' +
+      '<td class="votelinks"><a id="up_1" href="/vote?id=1&amp;how=up&amp;goto=item"><div class="votearrow" title="upvote"></div></a></td>' +
+      '<td class="default"><div class="comhead"><a class="hnuser">alice</a> <span class="age">1 hour ago</span></div>' +
+      '<div class="comment"><div class="commtext">a point</div></div></td>' +
+      "</tr></tbody></table></td></tr></tbody></table></body></html>";
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://news.ycombinator.com/item?id=1",
+    );
+    expect(markdown).toContain(
+      "[▲](https://news.ycombinator.com/vote?id=1&how=up&goto=item)",
+    );
+    expect(markdown).toContain("**alice**");
+  });
+
   it("nests old.reddit replies by DOM structure", () => {
     const comment = (author: string, text: string, child = ""): string =>
       '<div class="thing comment"><div class="entry">' +

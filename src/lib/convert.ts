@@ -398,18 +398,47 @@ function preserveComments(doc: Document): boolean {
   return reddit || hn;
 }
 
-/** Build the "**author** · meta" header line for a comment blockquote. */
+/**
+ * Build the "[▲] [▼] **author** · meta" header line for a comment blockquote.
+ * `lead` holds optional vote-arrow anchors placed before the author.
+ */
 function commentHeader(
   doc: Document,
   author: string | null | undefined,
   meta: string,
+  lead: Node[] = [],
 ): HTMLParagraphElement {
   const p = doc.createElement("p");
+  for (const node of lead) {
+    p.appendChild(node);
+    p.appendChild(doc.createTextNode(" "));
+  }
   const strong = doc.createElement("strong");
   strong.textContent = author?.trim() || "[deleted]";
   p.appendChild(strong);
   if (meta.trim()) p.appendChild(doc.createTextNode(` · ${meta.trim()}`));
   return p;
+}
+
+/**
+ * HN's comment vote arrows are plain GET links (vote?id=…&how=up&goto=…) that,
+ * once you're logged in, register the vote and redirect back — so they work in
+ * our navigate model. Return ▲/▼ anchors for whichever arrows the row has.
+ */
+function hnVoteArrows(doc: Document, row: Element): Node[] {
+  const out: Node[] = [];
+  for (const [dir, glyph] of [
+    ["up", "▲"],
+    ["down", "▼"],
+  ] as const) {
+    const href = row.querySelector(`a[id^="${dir}_"]`)?.getAttribute("href");
+    if (!href) continue;
+    const a = doc.createElement("a");
+    a.setAttribute("href", href);
+    a.textContent = glyph;
+    out.push(a);
+  }
+  return out;
 }
 
 // old.reddit nests replies structurally: .comment > .child > … > .comment.
@@ -469,7 +498,7 @@ function preserveHackerNewsComments(doc: Document): boolean {
     const bq = doc.createElement("blockquote");
     const author = row.querySelector(".hnuser")?.textContent;
     const age = row.querySelector(".age")?.textContent ?? "";
-    bq.appendChild(commentHeader(doc, author, age));
+    bq.appendChild(commentHeader(doc, author, age, hnVoteArrows(doc, row)));
     const text = row.querySelector(".commtext");
     if (text) bq.appendChild(text.cloneNode(true));
 
