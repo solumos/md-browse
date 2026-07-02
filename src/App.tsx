@@ -5,8 +5,9 @@ import { AddressBar } from "./components/AddressBar";
 import { NavControls } from "./components/NavControls";
 import { MarkdownView } from "./components/MarkdownView";
 import { ErrorView, LoadingView } from "./components/StatusView";
+import { ResubmitDialog } from "./components/ResubmitDialog";
 import { Welcome } from "./components/Welcome";
-import { useHistoryStack } from "./hooks/useHistoryStack";
+import { useHistoryStack, type HistoryEntry } from "./hooks/useHistoryStack";
 import { loadPage } from "./lib/browser";
 import { normalizeUrl } from "./lib/url";
 import { PageError, toPageError, type PageResult } from "./lib/types";
@@ -24,36 +25,97 @@ function App() {
   );
 
   const reqId = useRef(0);
+  /** Per-entry page cache: back/forward restore from here (bfcache-style). */
+  const cache = useRef(new Map<number, PageResult>());
+  /** Entries that have fetched at least once — refetching a POST one prompts. */
+  const loadedOnce = useRef(new Set<number>());
+  const lastHandled = useRef("");
+  const seenNonce = useRef(0);
+  const [resubmit, setResubmit] = useState<{
+    entry: HistoryEntry;
+    cleared: boolean;
+  } | null>(null);
 
-  const load = useCallback(async (url: string) => {
-    const id = ++reqId.current;
-    setStatus("loading");
-    setError(null);
-    try {
-      const page = await loadPage(url);
-      if (reqId.current !== id) return; // a newer navigation superseded this one
-      setResult(page);
-      setAddress(page.finalUrl);
-      setStatus("ready");
-    } catch (e) {
-      if (reqId.current !== id) return;
-      setError(toPageError(e));
-      setStatus("error");
-    }
-  }, []);
+  const load = useCallback(
+    async (entry: HistoryEntry) => {
+      const id = ++reqId.current;
+      setStatus("loading");
+      setError(null);
+      try {
+        const page = await loadPage(entry);
+        if (reqId.current !== id) return; // a newer navigation superseded this one
+        loadedOnce.current.add(entry.id);
+        cache.current.set(entry.id, page);
+        while (cache.current.size > 50) {
+          const oldest = cache.current.keys().next().value;
+          if (oldest === undefined) break;
+          cache.current.delete(oldest);
+        }
+        setResult(page);
+        setAddress(page.finalUrl);
+        setStatus("ready");
+        // Post/Redirect/Get: once a POST lands on a redirected page, demote the
+        // entry to a plain GET of that URL, so reload/back re-GET (no re-POST,
+        // no resubmission prompt) — exactly what mainstream browsers do.
+        if (entry.post && page.finalUrl !== entry.url) {
+          history.replace({ url: page.finalUrl });
+        }
+      } catch (e) {
+        if (reqId.current !== id) return;
+        setError(toPageError(e));
+        setStatus("error");
+      }
+    },
+    [history],
+  );
 
-  // Load whenever the current history entry changes or a reload is requested.
+  // Drive loads from history. Back/forward (current changes, nonce doesn't)
+  // restore from cache without re-requesting — so traversal never re-POSTs.
+  // Reload (nonce bump) refetches; refetching a POST result asks first, the
+  // way mainstream browsers confirm form resubmission.
   const { current, nonce } = history;
   useEffect(() => {
-    if (current) load(current);
+    if (!current) return;
+    const key = `${current.id}:${nonce}`;
+    if (lastHandled.current === key) return; // re-render / StrictMode re-run
+    lastHandled.current = key;
+    const isReload = nonce !== seenNonce.current;
+    seenNonce.current = nonce;
+    setResubmit(null);
+
+    if (!isReload) {
+      const cached = cache.current.get(current.id);
+      if (cached) {
+        reqId.current++; // supersede any in-flight load
+        setResult(cached);
+        setAddress(cached.finalUrl);
+        setError(null);
+        setStatus("ready");
+        return;
+      }
+    }
+    if (current.post && loadedOnce.current.has(current.id)) {
+      if (!isReload) {
+        // Traversal to a POST page whose cached result is gone (evicted): there's
+        // no page to show, so clear the stale one instead of overlaying the prompt.
+        reqId.current++;
+        setResult(null);
+        setError(null);
+        setAddress(current.url);
+        setStatus("loading");
+      }
+      setResubmit({ entry: current, cleared: !isReload });
+      return;
+    }
+    load(current);
   }, [current, nonce, load]);
 
   const navigate = useCallback(
-    (input: string) => {
+    (input: string, opts?: { post?: string }) => {
       try {
         const url = normalizeUrl(input);
         setAddress(url);
-        history.push(url);
+        history.push({ url, post: opts?.post });
       } catch (e) {
         setResult(null);
         setError(toPageError(e));
@@ -134,12 +196,36 @@ function App() {
           <MarkdownView
             markdown={result.markdown}
             baseUrl={result.finalUrl}
+            interactiveForms={result.source === "converted"}
             onNavigate={navigate}
             onOpenExternal={openExternal}
           />
         )}
         {status === "idle" && <Welcome onNavigate={navigate} />}
       </main>
+
+      {resubmit && (
+        <ResubmitDialog
+          onResubmit={() => {
+            const entry = resubmit.entry;
+            setResubmit(null);
+            load(entry);
+          }}
+          onCancel={() => {
+            // When we cleared the display for a traversal to an evicted POST
+            // page, leave a consistent state instead of a blank loader.
+            if (resubmit.cleared) {
+              setError(
+                new PageError("unknown", "Form not resubmitted.", {
+                  url: resubmit.entry.url,
+                }),
+              );
+              setStatus("error");
+            }
+            setResubmit(null);
+          }}
+        />
+      )}
     </div>
   );
 }

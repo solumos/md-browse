@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Markdown Browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.mdbrowse.browser",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -20,7 +20,12 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "img-src": "'self' data: http: https:",
+        "style-src": "'self' 'unsafe-inline'"
+      }
     }
   },
   "bundle": {

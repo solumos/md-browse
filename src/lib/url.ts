@@ -47,7 +47,20 @@ export function normalizeUrl(input: string): string {
     throw new PageError("invalid-url", "That URL is missing a host name.");
   }
 
+  preferServerRenderedHost(url);
   return url.toString();
+}
+
+/**
+ * Redirect JavaScript-only sites to a server-rendered equivalent, since this
+ * browser doesn't run page scripts. Reddit's www/new UI ships an empty shell;
+ * old.reddit.com serves real HTML with the posts and comments.
+ */
+function preferServerRenderedHost(url: URL): void {
+  const host = url.hostname.toLowerCase();
+  if (/^(www\.|m\.|np\.|new\.)?reddit\.com$/.test(host)) {
+    url.hostname = "old.reddit.com";
+  }
 }
 
 /** Resolve a possibly-relative href against a base URL. Returns null if unparseable. */

@@ -30,6 +30,7 @@ const TITLES: Record<string, string> = {
   network: "Can't reach the site",
   timeout: "The site timed out",
   "http-status": "The site returned an error",
+  "rate-limited": "Rate limited",
   "unsupported-content": "Unsupported content",
   "too-large": "Page too large",
   empty: "Nothing to show",
