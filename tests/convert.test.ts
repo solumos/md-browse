@@ -564,3 +564,94 @@ describe("htmlToMarkdown — noise cleanup", () => {
     expect(markdown).not.toContain("report");
   });
 });
+
+describe("htmlToMarkdown — reddit media", () => {
+  const listing = (post: string) =>
+    `<html><body><div class="content" role="main"><div class="sitetable">${post}</div></div></body></html>`;
+
+  it("keeps listing thumbnails as small linked images", () => {
+    const html = listing(
+      '<div class="thing link">' +
+        '<a class="thumbnail may-blank outbound" href="https://i.redd.it/full.jpeg">' +
+        '<img src="//preview.redd.it/full.jpeg?width=140&amp;height=140&amp;crop=1:1,smart&amp;s=sig"></a>' +
+        '<div class="entry"><p class="title"><a class="title" href="https://i.redd.it/full.jpeg">Rolex for sale</a></p>' +
+        '<p class="tagline">submitted <time>2 hours ago</time> by <a class="author" href="/user/u">u</a></p></div></div>',
+    );
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://old.reddit.com/r/Watchexchange/",
+    );
+    expect(markdown).toContain(
+      "[![](https://preview.redd.it/full.jpeg?width=140&height=140&crop=1:1,smart&s=sig)](https://i.redd.it/full.jpeg)",
+    );
+    expect(markdown).toContain("**[Rolex for sale](https://i.redd.it/full.jpeg)**");
+  });
+
+  it("renders nothing for a self post's imageless thumbnail placeholder", () => {
+    const html = listing(
+      '<div class="thing link">' +
+        '<a class="thumbnail self may-blank"></a>' +
+        '<div class="entry"><p class="title"><a class="title" href="/r/x/comments/1/">Rules update</a></p></div></div>',
+    );
+    const { markdown } = htmlToMarkdown(html, "https://old.reddit.com/r/x/");
+    expect(markdown).not.toContain("![");
+  });
+
+  it("inlines every gallery image on a gallery post's own page (no thumb dupe)", () => {
+    const html = listing(
+      '<div class="thing link">' +
+        '<a class="thumbnail may-blank outbound" href="https://www.reddit.com/gallery/1">' +
+        '<img src="//preview.redd.it/t.jpg?width=140&amp;height=140"></a>' +
+        '<div class="entry"><p class="title"><a class="title" href="https://www.reddit.com/gallery/1">[WTS] AP Royal Oak</a></p>' +
+        '<div class="expando expando-uninitialized"><div class="media-preview"><div class="media-gallery">' +
+        '<div class="gallery-tiles"><img class="preview" src="https://preview.redd.it/a.jpg?width=108&amp;s=1"></div>' +
+        '<div class="gallery-preview"><div class="media-preview-content">' +
+        '<a class="gallery-item-thumbnail-link" href="https://preview.redd.it/a.jpg?width=1080&amp;s=2"><img class="preview" src="https://preview.redd.it/a.jpg?width=1080&amp;s=2"></a></div></div>' +
+        '<div class="gallery-preview"><div class="media-preview-content">' +
+        '<a class="gallery-item-thumbnail-link" href="https://preview.redd.it/b.jpg?width=1080&amp;s=3"><img class="preview" src="https://preview.redd.it/b.jpg?width=1080&amp;s=3"></a></div></div>' +
+        "</div></div></div></div></div>",
+    );
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://old.reddit.com/r/Watchexchange/comments/1/wts/",
+    );
+    expect(markdown).toContain("![](https://preview.redd.it/a.jpg?width=1080&s=2)");
+    expect(markdown).toContain("![](https://preview.redd.it/b.jpg?width=1080&s=3)");
+    // The 108px grid tiles and the 140px thumbnail must not duplicate the media.
+    expect(markdown).not.toContain("width=140");
+    expect(markdown).not.toContain("a.jpg?width=108&s=1");
+  });
+
+  it("inlines a single-image post's preview linked to the original", () => {
+    const html = listing(
+      '<div class="thing link">' +
+        '<div class="entry"><p class="title"><a class="title" href="https://i.redd.it/x.jpeg">Datejust</a></p>' +
+        '<div class="expando expando-uninitialized"><div class="media-preview"><div class="media-preview-content">' +
+        '<a href="https://i.redd.it/x.jpeg" class="may-blank post-link">' +
+        '<img class="preview" src="https://preview.redd.it/x.jpeg?width=672&amp;s=9"></a>' +
+        "</div></div></div></div></div>",
+    );
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://old.reddit.com/r/Watchexchange/comments/2/wts/",
+    );
+    expect(markdown).toContain(
+      "[![](https://preview.redd.it/x.jpeg?width=672&s=9)](https://i.redd.it/x.jpeg)",
+    );
+  });
+
+  it("keeps selftext that lives inside an uninitialized expando", () => {
+    const html = listing(
+      '<div class="thing link">' +
+        '<div class="entry"><p class="title"><a class="title" href="/r/x/comments/3/">Announcement</a></p>' +
+        '<div class="expando expando-uninitialized"><form action="#" class="usertext">' +
+        '<div class="usertext-body"><div class="md"><p>The original announcement text survives.</p></div></div>' +
+        "</form></div></div></div>",
+    );
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://old.reddit.com/r/x/comments/3/announcement/",
+    );
+    expect(markdown).toContain("The original announcement text survives.");
+  });
+});

@@ -64,10 +64,17 @@ export function MarkdownView({
         </a>
       );
     },
-    img({ node: _node, ...rest }) {
+    img({ node: _node, src, ...rest }) {
+      const thumb = typeof src === "string" && isThumbnailUrl(src);
       return (
         // eslint-disable-next-line jsx-a11y/alt-text
-        <img {...rest} loading="lazy" referrerPolicy="no-referrer" />
+        <img
+          {...rest}
+          src={src}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className={thumb ? "inline-thumb" : undefined}
+        />
       );
     },
     // md-form code blocks are forms preserved from the original page — render
@@ -135,6 +142,27 @@ function hastText(node: ElementContent): string {
   if (node.type === "text") return node.value;
   if (node.type === "element") return node.children.map(hastText).join("");
   return "";
+}
+
+/**
+ * Listing thumbnails (reddit's ≤160px previews, YouTube's 120px default.jpg)
+ * render as small inline squares (.inline-thumb) instead of full-width figures.
+ */
+function isThumbnailUrl(src: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(src);
+  } catch {
+    return false;
+  }
+  if (/(^|\.)thumbs\.redditmedia\.com$/i.test(u.hostname)) return true;
+  // preview.redd.it / external-preview.redd.it serve both thumbs and full
+  // images — the requested width tells them apart.
+  if (/(^|\.)redd\.it$/i.test(u.hostname)) {
+    const width = Number(u.searchParams.get("width") ?? "0");
+    return width > 0 && width <= 160;
+  }
+  return u.hostname === "i.ytimg.com" && /\/default\.jpg$/i.test(u.pathname);
 }
 
 function handleLink(
