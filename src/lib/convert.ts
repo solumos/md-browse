@@ -275,10 +275,22 @@ function materializeIconLinks(doc: Document): void {
   }
 }
 
-/** Reddit noise removed on reddit pages (logged-out CTAs, action bars, dupe scores). */
-const REDDIT_CHROME =
-  ".listingsignupbar, .commentsignupbar, .menuarea, .flat-list.buttons," +
-  " .score.dislikes, .score.likes, .commentarea > .panestack-title, .infobar";
+/** Reddit noise removed on reddit pages (logged-out CTAs, chrome, dupe scores). */
+const REDDIT_CHROME = [
+  ".listingsignupbar", // "Welcome to Reddit" CTA
+  ".commentsignupbar", // "Want to add to the discussion?" CTA
+  ".menuarea", // comment sort controls
+  ".score.dislikes", // dupe vote-state scores (keep .unvoted)
+  ".score.likes",
+  ".commentarea > .panestack-title",
+  ".infobar",
+  ".rank", // listing rank numbers ("1", "2", …)
+  ".thumbnail", // thumbnail link + duration overlay ("[0:21]")
+  ".expando-uninitialized", // media that only loads via JS → "loading…" stub
+  ".expando-button",
+  ".linkflairlabel", // post flair badge (glues onto the title)
+  ".flairrichtext",
+].join(", ");
 
 /** Strip reddit's UI chrome so pages are just the post + comments. */
 function cleanRedditChrome(doc: Document, finalUrl: string): void {

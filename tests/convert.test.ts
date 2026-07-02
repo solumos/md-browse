@@ -505,4 +505,22 @@ describe("htmlToMarkdown — noise cleanup", () => {
     expect(markdown).not.toContain("Welcome to Reddit");
     expect(markdown).toContain("A real post title");
   });
+
+  it("strips reddit listing noise (flair glue, thumbnail duration, loading)", () => {
+    const html =
+      '<html><body><div class="content" role="main"><div class="sitetable">' +
+      '<div class="thing link"><span class="rank">1</span>' +
+      '<a class="thumbnail"><span class="duration-overlay">0:21</span></a>' +
+      '<div class="entry"><p class="title">' +
+      '<a class="title" href="https://v.redd.it/abc">Dog defence was needed tbh</a>' +
+      '<span class="linkflairlabel">SOCIETY</span></p>' +
+      '<div class="expando expando-uninitialized">loading...</div>' +
+      '<p class="tagline">submitted by <a class="author">Maleficent</a></p></div></div>' +
+      "</div></div></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://old.reddit.com/r/interesting/");
+    expect(markdown).toContain("Dog defence was needed tbh");
+    expect(markdown).not.toContain("SOCIETY"); // flair no longer glued to title
+    expect(markdown).not.toContain("loading"); // JS-only expando placeholder
+    expect(markdown).not.toContain("0:21"); // thumbnail duration overlay
+  });
 });
