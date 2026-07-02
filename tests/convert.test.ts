@@ -542,4 +542,25 @@ describe("htmlToMarkdown — noise cleanup", () => {
     expect(markdown).not.toContain("loading"); // JS-only expando placeholder
     expect(markdown).not.toContain("0:21"); // thumbnail duration overlay
   });
+
+  it("compacts reddit posts into a 2-line item and drops share/save/report", () => {
+    const html =
+      '<html><body><div class="content" role="main"><div class="sitetable">' +
+      '<div class="thing link"><div class="midcol"><div class="score unvoted">30.1k</div></div>' +
+      '<div class="entry"><p class="title"><a class="title" href="https://v.redd.it/x">Dog defence</a> ' +
+      '<span class="domain">(<a href="/domain/v.redd.it/">v.redd.it</a>)</span></p>' +
+      '<p class="tagline">submitted <time>12 hours ago</time> by <a class="author" href="/user/u">u</a></p>' +
+      '<ul class="flat-list buttons"><li class="first"><a class="comments" href="/r/x/comments/1/">5512 comments</a></li>' +
+      '<li><a href="javascript:void(0)">share</a></li><li><a href="javascript:void(0)">save</a></li>' +
+      '<li><a href="javascript:void(0)">report</a></li></ul></div></div>' +
+      "</div></div></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://old.reddit.com/r/x/");
+    expect(markdown).toContain("**[Dog defence](https://v.redd.it/x)**");
+    expect(markdown).toContain("30.1k");
+    expect(markdown).toContain(
+      "[5512 comments](https://old.reddit.com/r/x/comments/1/)",
+    );
+    expect(markdown).not.toContain("share");
+    expect(markdown).not.toContain("report");
+  });
 });

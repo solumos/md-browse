@@ -302,6 +302,71 @@ function cleanRedditChrome(doc: Document, finalUrl: string): void {
   }
   if (!/(^|\.)reddit\.com$/.test(host)) return;
   doc.querySelectorAll(REDDIT_CHROME).forEach((el) => el.remove());
+  // In a post's action bar, keep only the comments link (share/save/report/… are
+  // dead javascript: actions here and just add clutter).
+  doc.querySelectorAll(".flat-list.buttons li").forEach((li) => {
+    if (!li.querySelector("a.comments")) li.remove();
+  });
+  compactRedditPosts(doc);
+}
+
+/**
+ * Collapse each reddit link/post from a stack of separate blocks (score, title,
+ * tagline, comments on their own lines) into a tight two-line item:
+ *   **[title](url)** (domain)
+ *   score · r/sub · time · by user · [N comments](url)
+ */
+function compactRedditPosts(doc: Document): void {
+  for (const post of Array.from(doc.querySelectorAll(".thing.link"))) {
+    const titleEl = post.querySelector<HTMLAnchorElement>(".title a.title");
+    if (!titleEl) continue;
+
+    const item = doc.createElement("div");
+
+    const line1 = doc.createElement("p");
+    const strong = doc.createElement("strong");
+    const title = doc.createElement("a");
+    title.setAttribute("href", titleEl.getAttribute("href") ?? "");
+    title.textContent = (titleEl.textContent ?? "").trim();
+    strong.appendChild(title);
+    line1.appendChild(strong);
+    const domain = post
+      .querySelector(".title .domain")
+      ?.textContent?.replace(/[()]/g, "")
+      .trim();
+    if (domain) line1.appendChild(doc.createTextNode(` (${domain})`));
+    item.appendChild(line1);
+
+    const line2 = doc.createElement("p");
+    const sep = () => line2.appendChild(doc.createTextNode(" · "));
+    const text = (s: string) => line2.appendChild(doc.createTextNode(s));
+    const move = (el: Element | null) => {
+      if (el) line2.appendChild(el.cloneNode(true));
+    };
+    let first = true;
+    const part = (fn: () => void) => {
+      if (!first) sep();
+      first = false;
+      fn();
+    };
+    const score = post.querySelector(".score.unvoted")?.textContent?.trim();
+    if (score) part(() => text(score));
+    const sub = post.querySelector(".tagline .subreddit");
+    if (sub) part(() => move(sub));
+    const time = post.querySelector(".tagline time")?.textContent?.trim();
+    if (time) part(() => text(time));
+    const author = post.querySelector(".tagline .author");
+    if (author) part(() => { text("by "); move(author); });
+    const comments = post.querySelector("a.comments");
+    if (comments) part(() => move(comments));
+    if (line2.childNodes.length) item.appendChild(line2);
+
+    // Keep a self-post's body text (present on the post's own page).
+    const selftext = post.querySelector(".entry .usertext-body .md");
+    if (selftext) item.appendChild(selftext.cloneNode(true));
+
+    post.replaceWith(item);
+  }
 }
 
 /** Recover a label for a text-less anchor from its (or a child's) title/aria-label. */
