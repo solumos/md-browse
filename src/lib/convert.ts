@@ -200,7 +200,14 @@ function makeTurndown(baseUrl: string): TurndownService {
       const href = el.getAttribute("href");
       // Icon-only links (e.g. HN's vote arrows) have no text — recover a label
       // from a title/aria-label/nested alt so they stay usable, not invisible.
-      const text = content.trim() || iconLinkLabel(el);
+      // Collapse internal newlines: a markdown inline link's text must stay on
+      // one line, so an anchor wrapping block content (e.g. a thumbnail image +
+      // a caption, common in video-grid tiles) would otherwise emit a link with
+      // a blank line in it, which doesn't parse — rendering as broken `](url)`.
+      const text = (content.trim() || iconLinkLabel(el)).replace(
+        /\s*\n+\s*/g,
+        " ",
+      );
       if (!text) return ""; // truly empty anchor — nothing to show
       if (!href || href.startsWith("#")) return text; // no target / in-page anchor
       const abs = resolveUrl(href, baseUrl);
@@ -665,6 +672,18 @@ function preserveHackerNewsComments(doc: Document): boolean {
     bq.appendChild(commentHeader(doc, author, age, hnVoteArrows(doc, row)));
     const text = row.querySelector(".commtext");
     if (text) bq.appendChild(text.cloneNode(true));
+    // HN's per-comment "reply" link (a GET link to reply?id=…&goto=…). It's
+    // dropped when we rebuild the tree, so re-add it — navigating there shows
+    // the reply form (login-gated, like on HN itself).
+    const reply = row.querySelector(".reply a[href^='reply']");
+    if (reply) {
+      const p = doc.createElement("p");
+      const a = doc.createElement("a");
+      a.setAttribute("href", reply.getAttribute("href") ?? "");
+      a.textContent = "↳ reply";
+      p.appendChild(a);
+      bq.appendChild(p);
+    }
 
     const parent = depth > 0 ? stack[depth - 1] : undefined;
     (parent ?? container).appendChild(bq);

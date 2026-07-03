@@ -50,6 +50,47 @@ body {
 }
 
 /*
+ * Heading scale. @tailwindcss/typography wraps its heading rules in
+ * `:where(.prose)…`, which has ZERO specificity, so Tailwind's Preflight reset
+ * (`h1,h2,…{font-size:inherit;font-weight:inherit}`) wins and flattens every
+ * heading to body text. These unlayered rules (real specificity, no @layer)
+ * beat both, restoring a visible h1→h6 hierarchy.
+ */
+.prose :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+}
+.prose h1 {
+  font-size: 1.9em;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-top: 0.6em;
+}
+.prose h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 15%, transparent);
+  padding-bottom: 0.2em;
+}
+.prose h3 {
+  font-size: 1.25em;
+}
+.prose h4 {
+  font-size: 1.08em;
+}
+.prose h5 {
+  font-size: 0.95em;
+}
+.prose h6 {
+  font-size: 0.85em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.85;
+}
+
+/*
  * Listing thumbnails (reddit / YouTube results): small inline squares sitting
  * on the title line, not full-width prose figures.
  */
