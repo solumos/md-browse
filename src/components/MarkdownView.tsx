@@ -88,7 +88,7 @@ export function MarkdownView({
         );
       }
       const embed = mdEmbedSpec(node);
-      if (embed) return <MarkdownEmbed spec={embed} />;
+      if (embed) return <MarkdownEmbed spec={embed} onOpenExternal={onOpenExternal} />;
       return <pre {...rest}>{children}</pre>;
     },
   };
