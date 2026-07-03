@@ -8,19 +8,20 @@ import type { EmbedSpec } from "../lib/embeds";
  * can't be embedded here: in a packaged Tauri app the webview origin is
  * `tauri://localhost`, which sends no HTTP Referer, and YouTube's player now
  * hard-requires one — so an inline YouTube iframe fails with "Error 153: Video
- * player configuration error" (tauri-apps/tauri#14422). Rather than show a
- * broken frame, YouTube renders as a poster (thumbnail + play button) that opens
- * the video in the user's real browser, where it plays normally.
+ * player configuration error" (tauri-apps/tauri#14422). Instead, YouTube renders
+ * as a poster (thumbnail + play button) that opens the video in an in-app player
+ * window (onPlayVideo), where youtube.com loads as a normal top-level page and
+ * plays — no hand-off to the system browser.
  *
  * Allowed hosts are in the CSP (frame-src / media-src / img-src) in
  * tauri.conf.json.
  */
 export function MarkdownEmbed({
   spec,
-  onOpenExternal,
+  onPlayVideo,
 }: {
   spec: EmbedSpec;
-  onOpenExternal: (url: string) => void;
+  onPlayVideo: (url: string) => void;
 }) {
   if (spec.kind === "video") {
     return (
@@ -41,8 +42,8 @@ export function MarkdownEmbed({
       return (
         <button
           type="button"
-          onClick={() => onOpenExternal(watchUrl)}
-          title="Watch on YouTube"
+          onClick={() => onPlayVideo(watchUrl)}
+          title="Play video"
           className="not-prose group relative my-5 block aspect-video w-full overflow-hidden rounded-lg bg-black"
         >
           <img
@@ -59,7 +60,7 @@ export function MarkdownEmbed({
             </span>
           </span>
           <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 text-left text-sm font-medium text-white">
-            Watch on YouTube ↗
+            Play video
           </span>
         </button>
       );

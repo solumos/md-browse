@@ -6,7 +6,7 @@ import type { EmbedSpec } from "../src/lib/embeds";
 
 const render = (spec: EmbedSpec, onOpen: (url: string) => void = () => {}) =>
   renderToStaticMarkup(
-    createElement(MarkdownEmbed, { spec, onOpenExternal: onOpen }),
+    createElement(MarkdownEmbed, { spec, onPlayVideo: onOpen }),
   );
 
 describe("MarkdownEmbed", () => {
@@ -18,11 +18,11 @@ describe("MarkdownEmbed", () => {
     });
     expect(html).not.toContain("<iframe");
     expect(html).toContain("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
-    expect(html).toContain("Watch on YouTube");
+    expect(html).toContain("Play video");
     expect(html).toContain("<button");
   });
 
-  it("opens the YouTube watch URL externally when clicked", () => {
+  it("plays the YouTube watch URL in-app when clicked", () => {
     const onOpen = vi.fn();
     // renderToStaticMarkup can't fire events, so invoke the returned button's
     // onClick directly.
@@ -32,7 +32,7 @@ describe("MarkdownEmbed", () => {
         kind: "youtube",
         src: "https://www.youtube-nocookie.com/embed/abc123DEF45",
       },
-      onOpenExternal: onOpen,
+      onPlayVideo: onOpen,
     }) as { props: { onClick: () => void } };
     el.props.onClick();
     expect(onOpen).toHaveBeenCalledWith(
@@ -48,7 +48,7 @@ describe("MarkdownEmbed", () => {
     });
     expect(html).toContain("<video");
     expect(html).toContain("https://cdn.example.com/clip.mp4");
-    expect(html).not.toContain("Watch on YouTube");
+    expect(html).not.toContain("Play video");
   });
 
   it("keeps Vimeo as a sandboxed iframe", () => {

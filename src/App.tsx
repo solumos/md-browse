@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Webview } from "@tauri-apps/api/webview";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { AddressBar } from "./components/AddressBar";
 import { NavControls } from "./components/NavControls";
 import { MarkdownView } from "./components/MarkdownView";
@@ -110,8 +112,12 @@ function App() {
     load(current);
   }, [current, nonce, load]);
 
+  // A live URL playing inline in the reading pane (see the live-view effect).
+  const [livePlay, setLivePlay] = useState<string | null>(null);
+
   const navigate = useCallback(
     (input: string, opts?: { post?: string }) => {
+      setLivePlay(null); // leaving the page tears down any inline player
       try {
         const url = normalizeUrl(input);
         setAddress(url);
@@ -129,6 +135,85 @@ function App() {
     openUrl(url).catch(() => {
       /* opening externally is best-effort */
     });
+  }, []);
+
+  // Play a video inline (see the live-view effect below). YouTube can't be
+  // embedded in our page — its player needs an HTTP Referer our tauri://localhost
+  // origin can't send ("Error 153") — but loaded as a normal top-level page it's
+  // just the site running its own JS, and it plays.
+  const playVideo = useCallback((url: string) => setLivePlay(url), []);
+
+  // Inline "live view": overlay a child webview on the reading pane loading the
+  // live site as a top-level page (real origin → its own JS runs, videos play),
+  // so playback stays inside this window rather than an iframe (blocked), a popup
+  // window, or the system browser. The webview is a native layer above our HTML,
+  // so its close control lives in the header (which it doesn't cover).
+  const liveRef = useRef<Webview | null>(null);
+  const measurePane = () => {
+    const pane = document.getElementById("reading-pane");
+    if (!pane) return null;
+    const r = pane.getBoundingClientRect();
+    return {
+      x: Math.round(r.left),
+      y: Math.round(r.top),
+      w: Math.max(1, Math.round(r.width)),
+      h: Math.max(1, Math.round(r.height)),
+    };
+  };
+  useEffect(() => {
+    let disposed = false;
+    const teardown = async () => {
+      const wv = liveRef.current;
+      liveRef.current = null;
+      if (wv) {
+        try {
+          await wv.close();
+        } catch {
+          /* already gone */
+        }
+      }
+    };
+    if (livePlay) {
+      teardown().then(() => {
+        if (disposed) return;
+        const rect = measurePane();
+        if (!rect) return;
+        try {
+          const wv = new Webview(getCurrentWindow(), `live-${Date.now()}`, {
+            url: livePlay,
+            x: rect.x,
+            y: rect.y,
+            width: rect.w,
+            height: rect.h,
+          });
+          if (disposed) {
+            wv.close().catch(() => {});
+            return;
+          }
+          liveRef.current = wv;
+        } catch {
+          /* creating the child webview failed */
+        }
+      });
+    } else {
+      teardown();
+    }
+    return () => {
+      disposed = true;
+    };
+  }, [livePlay]);
+
+  // Keep the inline player aligned to the reading pane as the window resizes.
+  useEffect(() => {
+    const onResize = () => {
+      const wv = liveRef.current;
+      const rect = measurePane();
+      if (!wv || !rect) return;
+      wv.setPosition(new LogicalPosition(rect.x, rect.y)).catch(() => {});
+      wv.setSize(new LogicalSize(rect.w, rect.h)).catch(() => {});
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   // Apply dark mode to <html>.
@@ -180,11 +265,21 @@ function App() {
           onReload={history.reload}
         />
         <AddressBar url={address} loading={loading} onNavigate={navigate} />
+        {livePlay && (
+          <button
+            type="button"
+            onClick={() => setLivePlay(null)}
+            className="shrink-0 rounded-md bg-red-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-red-500"
+            title="Stop the inline video and return to the page"
+          >
+            ✕ Close video
+          </button>
+        )}
         {result && status === "ready" && <SourceBadge source={result.source} />}
         <DarkToggle dark={dark} onToggle={() => setDark((d) => !d)} />
       </header>
 
-      <main className="min-h-0 flex-1">
+      <main id="reading-pane" className="min-h-0 flex-1">
         {status === "loading" && <LoadingView />}
         {status === "error" && error && (
           <ErrorView
@@ -199,6 +294,7 @@ function App() {
             interactiveForms={result.source === "converted"}
             onNavigate={navigate}
             onOpenExternal={openExternal}
+            onPlayVideo={playVideo}
           />
         )}
         {status === "idle" && <Welcome onNavigate={navigate} />}
