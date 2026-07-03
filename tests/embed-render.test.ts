@@ -1,43 +1,25 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { MarkdownEmbed } from "../src/components/MarkdownEmbed";
 import type { EmbedSpec } from "../src/lib/embeds";
 
-const render = (spec: EmbedSpec, onOpen: (url: string) => void = () => {}) =>
-  renderToStaticMarkup(
-    createElement(MarkdownEmbed, { spec, onOpenExternal: onOpen }),
-  );
+const render = (spec: EmbedSpec) =>
+  renderToStaticMarkup(createElement(MarkdownEmbed, { spec }));
 
 describe("MarkdownEmbed", () => {
-  it("renders YouTube as a poster (no iframe — Error 153 can't happen)", () => {
+  it("renders YouTube as a static preview card (thumbnail + title, no iframe)", () => {
     const html = render({
       v: 1,
       kind: "youtube",
       src: "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+      title: "Never Gonna Give You Up",
     });
     expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("<button"); // no popup/overlay trigger
     expect(html).toContain("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg");
-    expect(html).toContain("Watch on YouTube");
-    expect(html).toContain("<button");
-  });
-
-  it("opens the YouTube watch URL externally when clicked", () => {
-    const onOpen = vi.fn();
-    // renderToStaticMarkup can't fire events, so invoke the returned button's
-    // onClick directly.
-    const el = MarkdownEmbed({
-      spec: {
-        v: 1,
-        kind: "youtube",
-        src: "https://www.youtube-nocookie.com/embed/abc123DEF45",
-      },
-      onOpenExternal: onOpen,
-    }) as { props: { onClick: () => void } };
-    el.props.onClick();
-    expect(onOpen).toHaveBeenCalledWith(
-      "https://www.youtube.com/watch?v=abc123DEF45",
-    );
+    expect(html).toContain("Never Gonna Give You Up");
+    expect(html).toContain("YouTube");
   });
 
   it("plays a direct video file inline in a <video>", () => {
@@ -48,7 +30,6 @@ describe("MarkdownEmbed", () => {
     });
     expect(html).toContain("<video");
     expect(html).toContain("https://cdn.example.com/clip.mp4");
-    expect(html).not.toContain("Watch on YouTube");
   });
 
   it("keeps Vimeo as a sandboxed iframe", () => {

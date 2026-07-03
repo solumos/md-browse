@@ -475,6 +475,25 @@ describe("htmlToMarkdown — comment threads (nesting)", () => {
     expect(markdown).toContain("**alice**");
   });
 
+  it("adds a reply link to HN comments", () => {
+    const html =
+      '<html><body><table class="comment-tree"><tbody>' +
+      '<tr class="athing comtr" id="9"><td><table><tbody><tr>' +
+      '<td class="ind" indent="0"><img width="0"></td>' +
+      '<td class="default"><div class="comhead"><a class="hnuser">alice</a> <span class="age">1 hour ago</span></div>' +
+      '<div class="comment"><div class="commtext">a point</div>' +
+      '<div class="reply"><p><font size="1"><u><a href="reply?id=9&amp;goto=item%3Fid%3D1%239">reply</a></u></font></p></div>' +
+      "</div></td>" +
+      "</tr></tbody></table></td></tr></tbody></table></body></html>";
+    const { markdown } = htmlToMarkdown(
+      html,
+      "https://news.ycombinator.com/item?id=1",
+    );
+    expect(markdown).toContain(
+      "[↳ reply](https://news.ycombinator.com/reply?id=9&goto=item%3Fid%3D1%239)",
+    );
+  });
+
   it("nests old.reddit replies by DOM structure", () => {
     const comment = (author: string, text: string, child = ""): string =>
       '<div class="thing comment"><div class="entry">' +
@@ -511,6 +530,23 @@ describe("htmlToMarkdown — noise cleanup", () => {
     expect(markdown).not.toContain("javascript:");
     expect(markdown).not.toContain("[share]"); // rendered as plain text
     expect(markdown).toContain("[go](https://ok.com/go)");
+  });
+
+  it("keeps a link wrapping block content (image + caption) on one line", () => {
+    // Video-grid tiles wrap a thumbnail image AND a caption in one <a>; if the
+    // link text spans a blank line it isn't a valid markdown link and renders
+    // as broken `](url)` text.
+    const html =
+      "<html><body><article>" +
+      `<p>${"Filler body text so readability keeps the page. ".repeat(6)}</p>` +
+      '<a href="/watch/1"><div><img src="/t.jpg" alt="Clip"></div><div>added today</div></a>' +
+      "</article></body></html>";
+    const { markdown } = htmlToMarkdown(html, "https://ex.com/");
+    expect(markdown).toContain(
+      "[![Clip](https://ex.com/t.jpg) added today](https://ex.com/watch/1)",
+    );
+    // No line that is just a dangling link tail.
+    expect(markdown).not.toMatch(/^\]\(https/m);
   });
 
   it("strips reddit logged-out chrome on reddit hosts", () => {
