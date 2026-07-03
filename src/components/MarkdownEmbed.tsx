@@ -1,28 +1,20 @@
 import type { EmbedSpec } from "../lib/embeds";
 
 /**
- * Renders a preserved video embed as an inline player.
+ * Renders a preserved video embed.
  *
- * Direct video files play in a native <video>. Vimeo loads in a sandboxed
- * iframe (its player JS runs inside the frame, not our page). YouTube, however,
- * can't be embedded here: in a packaged Tauri app the webview origin is
- * `tauri://localhost`, which sends no HTTP Referer, and YouTube's player now
- * hard-requires one — so an inline YouTube iframe fails with "Error 153: Video
- * player configuration error" (tauri-apps/tauri#14422). Instead, YouTube renders
- * as a poster (thumbnail + play button) that opens the video in an in-app player
- * window (onPlayVideo), where youtube.com loads as a normal top-level page and
- * plays — no hand-off to the system browser.
+ * Direct video files play inline in a native <video>, and Vimeo loads in a
+ * sandboxed iframe. YouTube cannot be played inside this app at all: an inline
+ * iframe fails with "Error 153" (a packaged Tauri app's tauri://localhost origin
+ * sends no HTTP Referer, which YouTube's player now requires), and the
+ * alternatives — a popup window or a native webview overlay — are worse than not
+ * playing. So a YouTube video is shown as a static preview card (thumbnail +
+ * title); it doesn't play in place.
  *
  * Allowed hosts are in the CSP (frame-src / media-src / img-src) in
  * tauri.conf.json.
  */
-export function MarkdownEmbed({
-  spec,
-  onPlayVideo,
-}: {
-  spec: EmbedSpec;
-  onPlayVideo: (url: string) => void;
-}) {
+export function MarkdownEmbed({ spec }: { spec: EmbedSpec }) {
   if (spec.kind === "video") {
     return (
       <video
@@ -37,32 +29,29 @@ export function MarkdownEmbed({
   if (spec.kind === "youtube") {
     const id = spec.src.match(/\/embed\/([\w-]+)/)?.[1];
     if (id) {
-      const watchUrl = `https://www.youtube.com/watch?v=${id}`;
       const poster = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
       return (
-        <button
-          type="button"
-          onClick={() => onPlayVideo(watchUrl)}
-          title="Play video"
-          className="not-prose group relative my-5 block aspect-video w-full overflow-hidden rounded-lg bg-black"
-        >
-          <img
-            src={poster}
-            alt={spec.title || "YouTube video"}
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover opacity-90 transition group-hover:opacity-100"
-          />
-          <span className="absolute inset-0 flex items-center justify-center">
-            <span className="flex h-12 w-[74px] items-center justify-center rounded-xl bg-red-600 text-white shadow-lg transition group-hover:scale-110">
-              <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current" aria-hidden="true">
+        <figure className="not-prose my-5">
+          <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+            <img
+              src={poster}
+              alt={spec.title || "YouTube video"}
+              referrerPolicy="no-referrer"
+              className="h-full w-full object-cover"
+            />
+            <span className="absolute left-2 top-2 flex items-center gap-1 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-red-500" aria-hidden="true">
                 <path d="M8 5v14l11-7z" />
               </svg>
+              YouTube
             </span>
-          </span>
-          <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 text-left text-sm font-medium text-white">
-            Play video
-          </span>
-        </button>
+          </div>
+          {spec.title && (
+            <figcaption className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+              {spec.title}
+            </figcaption>
+          )}
+        </figure>
       );
     }
   }

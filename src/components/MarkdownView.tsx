@@ -28,8 +28,6 @@ interface Props {
   onNavigate: (url: string, opts?: { post?: string }) => void;
   /** Open a URL in the OS default handler (mailto:, downloads, modifier-click…). */
   onOpenExternal: (url: string) => void;
-  /** Play a video URL in an in-app player window (YouTube can't embed inline). */
-  onPlayVideo: (url: string) => void;
 }
 
 // True downloads / files we can't show — open these in the OS instead. Images
@@ -43,7 +41,6 @@ export function MarkdownView({
   interactiveForms,
   onNavigate,
   onOpenExternal,
-  onPlayVideo,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -91,7 +88,7 @@ export function MarkdownView({
         );
       }
       const embed = mdEmbedSpec(node);
-      if (embed) return <MarkdownEmbed spec={embed} onPlayVideo={onPlayVideo} />;
+      if (embed) return <MarkdownEmbed spec={embed} />;
       return <pre {...rest}>{children}</pre>;
     },
   };
