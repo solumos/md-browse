@@ -36,6 +36,39 @@ const ARTICLE_HTML = `<!doctype html><html><head><title>Hello World</title></hea
   <footer>footer junk</footer>
 </body></html>`;
 
+describe("buildPage — JS-fallback trigger (empty detection)", () => {
+  // loadPage re-renders with JavaScript exactly when buildPage throws "empty".
+  it("throws kind 'empty' for a client-rendered shell (→ triggers JS render)", () => {
+    const shell = raw({
+      body:
+        '<html><head><title>App</title></head><body>' +
+        '<div id="root"></div><script src="/app.js"></script></body></html>',
+      contentType: "text/html; charset=utf-8",
+    });
+    expect(() => buildPage(shell, BASE)).toThrow(PageError);
+    try {
+      buildPage(shell, BASE);
+    } catch (e) {
+      expect((e as PageError).kind).toBe("empty");
+    }
+  });
+
+  it("does NOT throw for a real article (no needless JS render)", () => {
+    const page = buildPage(
+      raw({
+        body:
+          "<html><body><article><h1>Real Title</h1><p>" +
+          "Plenty of genuine article text that converts cleanly. ".repeat(8) +
+          "</p></article></body></html>",
+        contentType: "text/html; charset=utf-8",
+      }),
+      BASE,
+    );
+    expect(page.source).toBe("converted");
+    expect(page.markdown).toContain("Real Title");
+  });
+});
+
 describe("buildPage — content negotiation", () => {
   it("passes through native markdown unchanged", () => {
     const page = buildPage(

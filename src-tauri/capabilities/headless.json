@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "headless-capture",
+  "description": "Lets the offscreen JS-render webviews (label headless-*) return their rendered HTML via the capture_html command. Scoped to those webviews only.",
+  "windows": ["headless-*"],
+  "remote": {
+    "urls": ["http://**", "https://**"]
+  },
+  "permissions": ["core:event:allow-emit"]
+}
