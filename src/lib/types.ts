@@ -22,7 +22,7 @@ export interface RawResponse {
 }
 
 /** How the markdown for a page was obtained. */
-export type PageSource = "native" | "converted" | "raw";
+export type PageSource = "native" | "converted" | "raw" | "js";
 
 /** A successfully loaded page, ready to render. */
 export interface PageResult {

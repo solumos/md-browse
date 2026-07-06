@@ -235,6 +235,7 @@ function SourceBadge({ source }: { source: PageResult["source"] }) {
     native: { label: "Markdown", cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" },
     converted: { label: "Converted", cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300" },
     raw: { label: "Raw", cls: "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300" },
+    js: { label: "JS", cls: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" },
   } as const;
   const { label, cls } = map[source];
   return (
@@ -245,7 +246,9 @@ function SourceBadge({ source }: { source: PageResult["source"] }) {
           ? "This site served markdown directly"
           : source === "converted"
             ? "Converted from HTML"
-            : "Shown as raw text"
+            : source === "js"
+              ? "Rendered with JavaScript, then converted"
+              : "Shown as raw text"
       }
     >
       {label}

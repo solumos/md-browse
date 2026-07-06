@@ -1,13 +1,18 @@
+import { invoke } from "@tauri-apps/api/core";
 import { buildPage } from "./convert";
 import { embedBlock, videoEmbedFor } from "./embeds";
 import { fetchRaw } from "./fetchPage";
 import { normalizeUrl } from "./url";
-import type { NavRequest, PageResult } from "./types";
+import { PageError, type NavRequest, type PageResult } from "./types";
 
 /**
  * The full load pipeline for one navigation: normalize the address, fetch it
  * natively (asking for markdown; as a POST when the request carries a form
  * body), then negotiate/convert into renderable markdown.
+ *
+ * When the no-JavaScript fetch yields a near-empty page (a client-rendered SPA
+ * shell), fall back to rendering it with JavaScript in an offscreen webview and
+ * converting the settled DOM instead.
  */
 export async function loadPage(req: NavRequest): Promise<PageResult> {
   const url = normalizeUrl(req.url);
@@ -28,5 +33,29 @@ export async function loadPage(req: NavRequest): Promise<PageResult> {
   }
 
   const raw = await fetchRaw(url, req.post);
-  return buildPage(raw, url);
+  try {
+    return buildPage(raw, url);
+  } catch (e) {
+    // A GET that converted to nothing is likely a JS-only page; re-render it
+    // with JavaScript and convert the resulting DOM. (POSTs aren't retried —
+    // resubmitting a form body through a fresh webview isn't safe/meaningful.)
+    if (req.post == null && e instanceof PageError && e.kind === "empty") {
+      return renderWithJs(url, raw.finalUrl, raw.status);
+    }
+    throw e;
+  }
+}
+
+/** Re-render a URL in an offscreen JS-enabled webview and convert the settled DOM. */
+async function renderWithJs(
+  url: string,
+  finalUrl: string,
+  status: number,
+): Promise<PageResult> {
+  const html = await invoke<string>("render_with_js", { url });
+  const page = buildPage(
+    { body: html, contentType: "text/html", finalUrl, status: status || 200 },
+    url,
+  );
+  return { ...page, source: "js" };
 }
